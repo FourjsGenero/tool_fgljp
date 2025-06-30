@@ -36,7 +36,11 @@ console.log("gbc_fgljp begin");
     _useSSE= (useSSE=="1") ?true:false;
     _verbose= (verbose=="1") ?true:false;
     _proto=window.gbcWrapper.protocolVersion;
-    _isBrowser=window.gbcWrapper.isBrowser();
+    if (window.gbcWrapper.isPlatformTypeBrowser) {
+      _isBrowser=window.gbcWrapper.isPlatformTypeBrowser()
+    } else if (window.gbcWrapper.isBrowser) {
+      _isBrowser=window.gbcWrapper.isBrowser();
+    }
     mylog("_useSSE:"+_useSSE+",_proto:"+_proto+",_isBrowser:"+_isBrowser);
   }
   checkQueryParams();

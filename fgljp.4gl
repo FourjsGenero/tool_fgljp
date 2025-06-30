@@ -291,7 +291,7 @@ MAIN
   LET _owndir = os.Path.fullPath(os.Path.dirName(arg_val(0)))
   IF _opt_program IS NOT NULL THEN
     CALL checkGBCAvailable()
-    CALL setup_program(_opt_program1, priv, pub, "")
+    CALL setup_program(_opt_program1, priv, pub)
   END IF
   LET _channels[1] = _server
   WHILE (idx := util.Channels.select(_channels)) <> 0
@@ -430,14 +430,9 @@ FUNCTION setup_program_old(priv STRING, pub STRING, port INT)
   RUN s WITHOUT WAITING
 END FUNCTION
 
-FUNCTION getProgramDir() RETURNS STRING
-  RETURN os.Path.pwd()
-END FUNCTION
-
-FUNCTION setup_program(program1 STRING, priv STRING, pub STRING, query STRING)
+FUNCTION setup_program(program1 STRING, priv STRING, pub STRING)
   DEFINE s, arg1, cmd, fglrun STRING
   DEFINE code INT
-  --VAR progdir = getProgramDir()
   VAR progdir = os.Path.fullPath(os.Path.dirName(program1))
   LET _pubdir = os.Path.join(progdir, "pub")
   LET _privdir = os.Path.join(progdir, "priv")
@@ -456,8 +451,6 @@ FUNCTION setup_program(program1 STRING, priv STRING, pub STRING, query STRING)
   }
   --CALL fgl_setenv("FGLGUIDEBUG", "1")
   --CALL fgl_setenv("FGLGUIDEBUG", "1")
-  --should work on both Win and Unix
-  --LET s= "cd ",_progdir,"&&fglrun ",os.Path.baseName(prog)
   VAR program = program1.trim()
   LET arg1 = os.Path.fullPath(program)
   LET cmd = "fglrun -r ", quote(arg1), IIF(isWin(), ">NUL", " >/dev/null 2>&1")
@@ -466,8 +459,8 @@ FUNCTION setup_program(program1 STRING, priv STRING, pub STRING, query STRING)
   RUN cmd RETURNING code
   --if code is set the 1st arg is not a valid .42m or .42r
   LET fglrun = IIF(code, "", "fglrun ")
-  LET s = SFMT("%1%2%3", fglrun, program, getArgsFromQuery(query))
-  CALL log(SFMT("RUN:'%1' WITHOUT WAITING", s))
+  LET s = SFMT("%1%2", fglrun, _opt_program)
+  CALL log(SFMT("xRUN:'%1' WITHOUT WAITING", s))
   RUN s WITHOUT WAITING
 END FUNCTION
 
@@ -620,7 +613,7 @@ PRIVATE FUNCTION parseArgs()
   END WHILE
   IF (cnt := mygetopt.getMoreArgumentCount(gr)) >= 1 THEN
     FOR i = 1 TO cnt
-      LET _opt_program = _opt_program, mygetopt.getMoreArgument(gr, i), " "
+      LET _opt_program = _opt_program, quote(mygetopt.getMoreArgument(gr, i)), " "
       IF i == 1 THEN
         LET _opt_program1 = _opt_program
       END IF
@@ -1612,7 +1605,7 @@ FUNCTION findFile(x TConn INOUT, path STRING) RETURNS BOOLEAN
     IF _direct_mode THEN --ask VM
       RETURN processRemoteFile(x: x, fname: path)
     END IF
-    RETURN FALSE
+    RETURN http404(x, path)
   END IF
   IF x.ftLockFile THEN
     RETURN lockFile(x, relpath)
@@ -1945,7 +1938,6 @@ FUNCTION http404(x TConn INOUT, fn STRING) RETURNS BOOLEAN
       SFMT("<!DOCTYPE html><html><body>Can't find: '%1'</body></html>", fn)
   CALL log(SFMT("http404:%1", fn))
   LET x.cdattachment = FALSE
-  --DISPLAY "http404 for:", fn
   RETURN writeResponseInt(x, content, "text/html", "404 Not Found")
 END FUNCTION
 
@@ -2996,6 +2988,7 @@ FUNCTION handleStart2(v TVMRec INOUT)
       IF _verbose THEN
         LET startPath = startPath, "&verbose=1"
       END IF
+      LET startPath = startPath, "&debugmode=1"
     END IF
     IF _firstPath IS NULL THEN
       LET _firstPath = "/", startPath
@@ -3357,7 +3350,6 @@ FUNCTION handleWaitContent(x TConn INOUT) RETURNS BOOLEAN
     END IF
     IF NOT ok THEN
       RETURN http404(x, fn: path)
-      --RETURN FALSE
     END IF
   END IF
   RETURN invokeHttpHandler(x, path)
