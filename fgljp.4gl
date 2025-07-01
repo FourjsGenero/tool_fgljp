@@ -1660,7 +1660,10 @@ END FUNCTION
 FUNCTION vmidxFromAppCookie(x TConn INOUT, fname STRING) RETURNS INT
   DEFINE vmidx INT
   LET vmidx = vmidxFromAppCookieInt(x, fname)
-  MYASSERT(vmidx >= 1 AND vmidx <= _v.getLength())
+  IF vmidx < 1 THEN
+    RETURN 0
+  END IF
+  MYASSERT(vmidx <= _v.getLength())
   IF vmidx > 0 AND vmidx <= _v.getLength() THEN
     IF _v[vmidx].state == S_FINISH THEN
       CALL log(
