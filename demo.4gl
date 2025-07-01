@@ -137,6 +137,7 @@ FUNCTION testProcessing()
   FOR i = 1 TO 3
     MESSAGE SFMT("Processing %1", i)
     CALL ui.Interface.refresh()
+    SLEEP 1
   END FOR
   CLOSE WINDOW processing
 END FUNCTION

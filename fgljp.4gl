@@ -2975,15 +2975,19 @@ FUNCTION handleGBCVersion(v TVMRec INOUT, gbcVerFile STRING)
 END FUNCTION
 
 FUNCTION handleStart2(v TVMRec INOUT)
-  DEFINE url, procId, startPath STRING
+  DEFINE url, procId, startPath,platfName,platfType STRING
   DEFINE no_browser BOOLEAN
   LET procId = v.procId
   LET no_browser = _opt_runonserver OR _opt_gdc
   IF NOT no_browser THEN
     LET startPath = SFMT("gbc/index.html?app=%1&useSSE=%2", procId, v.useSSE)
     IF _useJSWrapper THEN
-      LET startPath = startPath, "&UR_PLATFORM_TYPE=native"
-      LET startPath = startPath, "&UR_PLATFORM_NAME=GDC"
+      --since GBC5 we can announce being a browser thingy
+      LET platfType=IIF(_gbcver >= 5.0,"browser","native")
+      LET startPath = startPath, "&UR_PLATFORM_TYPE=",platfType
+      --since GBC5 the chrome isn't shown for GDC so we masquerade as GWA
+      LET platfName=IIF(_gbcver >= 5.0,"GWA","GDC")
+      LET startPath = startPath, "&UR_PLATFORM_NAME=",platfName
       LET startPath = startPath, "&UR_PROTOCOL_TYPE=direct"
       IF _gbcver >= 4.0 THEN
         LET startPath = startPath, "&UR_PROTOCOL_VERSION=2"

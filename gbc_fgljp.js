@@ -23,6 +23,7 @@ console.log("gbc_fgljp begin");
   var _sse_timer=null;
   var _empty_trials=0; //number of attempts to get SSE events if we have no procIds
   var _isGBC4 = true;
+  var _isGBC5 = true;
   var _gbcMajor = 1;
   var _gbcMinor = 0;
   var _gbcPatchLevel = 0;
@@ -491,7 +492,7 @@ console.log("gbc_fgljp begin");
       url.removeQueryString("UR_PLATFORM_NAME");
       url.removeQueryString("UR_PROTOCOL_TYPE");
       url.removeQueryString("UR_PROTOCOL_VERSION");
-      var s=url.addQueryString("monitor", !0).toString();
+      var s=url.addQueryString("monitor", 1).toString();
       window.open(s);
     }
     window.gbcWrapper.send = function(data, options) {
@@ -676,37 +677,40 @@ console.log("gbc_fgljp begin");
       addEventSource(url);
     /*}*/
   }
+  function myResourcePath(path, nativePrefix, browserPrefix) {
+    // if path has a scheme, don't change it
+    if (!path || /^(http[s]?|[s]?ftp|data|file|font)/i.test(path)) {
+      return path;
+    }
+    //console.log("wrapResourcePath path:"+path+",nativePrefix:"+nativePrefix+",browserPrefix:"+browserPrefix);
+    //var startPath = (browserPrefix ? browserPrefix + "/" : "");
+    if (nativePrefix == "webcomponents" ) {
+      nativePrefix = "webcomponents/webcomponents";
+    }
+    var startPath = (nativePrefix ? nativePrefix + "/" : "");
+    let returnPath = startPath + path;
+    //console.log("returnPath:"+returnPath);
+    return returnPath;
+  }
   function addGBCPatchesInt(gbc,haveDebuggerFCs) {
     var gbcP=Object.getPrototypeOf(gbc);
     var classes=gbcP.classes;
-    //if ((!_isGBC4) || (_isGBC4 && _gbcMinor_PL<"00.05")) {
+    if (_isGBC5 && gbcWrapper.wrapResourcePath) {
+      gbcWrapper.wrapResourcePath=myResourcePath;
+    } else {
       patchWrapResourcePath(classes); //workaround GBC-3240,GBC-3105
-    //}
+    }
     patchSendUpload(classes);
     if (_isGBC4 && !haveDebuggerFCs) {
       patchNavMan(classes); //add some helpers
     }
+    patchFCURForced(gbc);
     addFGLGBCFrontCalls(gbc);
   }
-
   function patchWrapResourcePath(classes) {
     var VMApplicationP = classes.VMApplication.prototype;
     //wrapResourcePath should mask non conform path symbols such as \ or :
-    VMApplicationP.wrapResourcePath = function(path, nativePrefix, browserPrefix) {
-      // if path has a scheme, don't change it
-      if (!path || /^(http[s]?|[s]?ftp|data|file|font)/i.test(path)) {
-        return path;
-      }
-      //console.log("wrapResourcePath path:"+path+",nativePrefix:"+nativePrefix+",browserPrefix:"+browserPrefix);
-      //var startPath = (browserPrefix ? browserPrefix + "/" : "");
-      if (nativePrefix == "webcomponents" ) {
-        nativePrefix = "webcomponents/webcomponents";
-      }
-      var startPath = (nativePrefix ? nativePrefix + "/" : "");
-      let returnPath = startPath + path;
-      //console.log("returnPath:"+returnPath);
-      return returnPath;
-    }
+    VMApplicationP.wrapResourcePath = myResourcePath;
   }
 
   function patchSendUpload(classes) {
@@ -739,6 +743,20 @@ console.log("gbc_fgljp begin");
       request.send(thefile);
     }
   }
+
+  function patchFCURForced(gbc) {
+     var fcs=gbc.FrontCallService;
+     if (!fcs) {
+       console.warn("patchFC no classes.FrontCallService found");
+       return;
+     }
+     if (fcs.isFrontCallURForced) {
+       fcs.isFrontCallURForced=function() {
+         return true;
+       }
+     }
+  }
+  fgljp.patchFCURForced=patchFCURForced;
 
   function patchNavMan(classes) {
     var navP = classes.VMSessionNavigationManager.prototype;
@@ -825,6 +843,7 @@ console.log("gbc_fgljp begin");
   window.gbc.ThemeService.setValue("theme-sidebar-max-width","100000px");
   var ver=window.gbc.version;
   _isGBC4= parseFloat(ver)>=4.0;
+  _isGBC5= parseFloat(ver)>=5.0;
   var firstDot= ver.indexOf(".");
   myassert(firstDot>=0);
   _gbcMajor = parseInt(ver.substring(0,firstDot));
@@ -845,13 +864,16 @@ console.log("gbc_fgljp begin");
     window.__gbcDefer = function (start) {//only called in "browser" mode by GBC
       mylog("__gbcDefer called in browser mode,_useSSE:"+_useSSE+",start:"+start);
       mylog("gbc ver:"+window.gbc.version+",_isGBC4:"+_isGBC4);
-      if (_useSSE) {
+      if (_useSSE && !_isGBC5) {
         myalert("_useSSE active, not possible to be set in browser mode");
         return;
       }
       addGBCPatches(window.gbc);
       start();
     };
+    if (_isGBC5) {
+      startWrapper();
+    }
   } else {
     startWrapper();
   }
