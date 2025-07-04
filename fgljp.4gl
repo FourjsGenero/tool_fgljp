@@ -4069,6 +4069,11 @@ FUNCTION openBrowser(url)
     RETURN
   END IF
   LET browser = fgl_getenv("BROWSER")
+  IF browser=="none" THEN
+    DISPLAY "Copy the following URL into your browser:"
+    DISPLAY url
+    RETURN
+  END IF
   CASE
     WHEN browser IS NOT NULL AND browser <> "default" AND browser <> "standard"
       IF browser == "gdcm" THEN --TODO: gdcm
