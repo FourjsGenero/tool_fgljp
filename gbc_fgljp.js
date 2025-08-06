@@ -434,7 +434,12 @@ console.log("gbc_fgljp begin");
       sess.addServerFeatures(["ft-lock-file"]);
       var UCName=(_proto==2)? o.content.UCName : o.UCName;
       var UCVersion =(_proto==2)? o.content.UCVersion : o.UCVersion;
-      var meta='meta Client{{name "GBC"} {UCName "'+UCName+'"} {version "'+UCVersion+'"} {host "browser"} {encapsulation "0"} {filetransfer "0"}}\n';
+      var mobileUI = (_proto==2)? 
+         o.content.mobileUI!==undefined? ` {mobileUI "${o.content.mobileUI}"`:"":"";
+      var multiColumnSort = (_proto==2)? 
+         o.content.multiColumnSort!==undefined? ` {multiColumnSort "${o.content.multiColumnSort}"`:"":"";
+      var meta=`meta Client{{name "GBC"} {UCName "${UCName}"} {version "${UCVersion}"} {host "browser"} {encapsulation "0"} {filetransfer "0"}${mobileUI}${multiColumnSort}}\n`;
+
       myassert(_sessId!=null);
       mylog("meta:",meta);
       _procIds.set(o.procId,_lastMeta);
