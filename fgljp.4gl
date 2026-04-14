@@ -53,7 +53,7 @@ IMPORT JAVA java.security.SecureRandom
 --IMPORT JAVA java.lang.Boolean
 --IMPORT JAVA java.util.Arrays
 CONSTANT _keepalive =
-    TRUE --if set to TRUE http socket connections are kept alive, needed for safari browser close
+    FALSE --if set to TRUE http socket connections are kept alive, needed for safari browser close
 --TODO sometimes Safari blocks after fgl_putfile() if keepalive is true
 DEFINE _useJSWrapper BOOLEAN --whether we use the 'native' embed mode in GBC
 --set after the first GBC is loaded
@@ -1316,7 +1316,7 @@ FUNCTION sendToClient(
   LET hdrs[hdrs.getLength() + 1] = "Vary: Content-Encoding"
   --LET hdrs[hdrs.getLength() + 1] = "X-FourJs-Version: 2.0"
   --LET hdrs[hdrs.getLength() + 1] = "X-FourJs-WebComponent: "|| procId || "/"
-  LET hdrs[hdrs.getLength() + 1] = "X-FourJs-Server: GAS/3.20.14-202012101044"
+  LET hdrs[hdrs.getLength() + 1] = "X-FourJs-Server: GAS/4.20.14-202012101044"
   LET hdrs[hdrs.getLength() + 1] = "X-FourJs-Timeout: 10000"
   LET hdrs[hdrs.getLength() + 1] = "X-FourJs-Request-Result: 10000"
   IF _opt_gdc IS NOT NULL THEN
@@ -1861,6 +1861,7 @@ FUNCTION createDout(chan SocketChannel)
 END FUNCTION
 
 FUNCTION writeHTTPLine(x INT, s STRING)
+  --DISPLAY "writeHTTPLine:",s
   LET s = s, "\r\n"
   CALL writeHTTP(x, s)
 END FUNCTION
@@ -4019,6 +4020,11 @@ FUNCTION openBrowser(url)
     RETURN
   END IF
   LET browser = fgl_getenv("BROWSER")
+  IF browser=="none" THEN
+    DISPLAY "Copy the following URL into your browser:"
+    DISPLAY url
+    RETURN
+  END IF
   CASE
     WHEN browser IS NOT NULL AND browser <> "default" AND browser <> "standard"
       IF browser == "gdcm" THEN --TODO: gdcm

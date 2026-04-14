@@ -23,6 +23,7 @@ console.log("gbc_fgljp begin");
   var _sse_timer=null;
   var _empty_trials=0; //number of attempts to get SSE events if we have no procIds
   var _isGBC4 = true;
+  var _isGBC5 = true;
   var _gbcMajor = 1;
   var _gbcMinor = 0;
   var _gbcPatchLevel = 0;
@@ -36,8 +37,12 @@ console.log("gbc_fgljp begin");
     _useSSE= (useSSE=="1") ?true:false;
     _verbose= (verbose=="1") ?true:false;
     _proto=window.gbcWrapper.protocolVersion;
-    _isBrowser=window.gbcWrapper.isBrowser();
-    mylog("_useSSE:"+_useSSE+",_proto:"+_proto+",_isBrowser:"+_isBrowser);
+    if (window.gbcWrapper.isPlatformTypeBrowser) {
+      _isBrowser=window.gbcWrapper.isPlatformTypeBrowser()
+    } else if (window.gbcWrapper.isBrowser) {
+      _isBrowser=window.gbcWrapper.isBrowser();
+    }
+    mylog("_useSSE:"+_useSSE+",_proto:"+_proto+",_isBrowser:"+_isBrowser+",_debug:"+_debug+",_verbose:"+_verbose);
   }
   checkQueryParams();
   if (_debug || _verbose) {
@@ -210,7 +215,7 @@ console.log("gbc_fgljp begin");
       mylog("got session id:"+_sessId+",headers:"+headers);
       //_wcPath=_xmlH.getResponseHeader("X-Fourjs-Webcomponent");
       var srv=_xmlH.getResponseHeader("X-Fourjs-Server");
-      mylog("srv:"+srv); 
+      mylog("srv:"+srv+",_useSSE:"+_useSSE); 
       if (_useSSE && _source == null) {
         var url=getUrlBase() + "/ua/sse/"+encodeURIComponent(_sessId)+"?appId=0";
         addEventSource(url); 
@@ -429,7 +434,12 @@ console.log("gbc_fgljp begin");
       sess.addServerFeatures(["ft-lock-file"]);
       var UCName=(_proto==2)? o.content.UCName : o.UCName;
       var UCVersion =(_proto==2)? o.content.UCVersion : o.UCVersion;
-      var meta='meta Client{{name "GBC"} {UCName "'+UCName+'"} {version "'+UCVersion+'"} {host "browser"} {encapsulation "0"} {filetransfer "0"}}\n';
+      var mobileUI = (_proto==2)? 
+         o.content.mobileUI!==undefined? ` {mobileUI "${o.content.mobileUI}"`:"":"";
+      var multiColumnSort = (_proto==2)? 
+         o.content.multiColumnSort!==undefined? ` {multiColumnSort "${o.content.multiColumnSort}"`:"":"";
+      var meta=`meta Client{{name "GBC"} {UCName "${UCName}"} {version "${UCVersion}"} {host "browser"} {encapsulation "0"} {filetransfer "0"}${mobileUI}${multiColumnSort}}\n`;
+
       myassert(_sessId!=null);
       mylog("meta:",meta);
       _procIds.set(o.procId,_lastMeta);
@@ -487,7 +497,7 @@ console.log("gbc_fgljp begin");
       url.removeQueryString("UR_PLATFORM_NAME");
       url.removeQueryString("UR_PROTOCOL_TYPE");
       url.removeQueryString("UR_PROTOCOL_VERSION");
-      var s=url.addQueryString("monitor", !0).toString();
+      var s=url.addQueryString("monitor", 1).toString();
       window.open(s);
     }
     window.gbcWrapper.send = function(data, options) {
@@ -606,6 +616,11 @@ console.log("gbc_fgljp begin");
       reAddSource(url,false);
       myMeta(data.trim());
     });
+    source.addEventListener('retry', function(e) {
+      const procId=e.lastEventId;
+      console.log("SSE retry:'"+typeof e.data+","+e.data+"',id:"+procId);
+      reAddSource(url,false);
+    });
     source.addEventListener('message', function(e) {
       var procId = e.lastEventId;
       mylog("SSE msg data:'"+e.data+"',id:"+procId);
@@ -633,6 +648,9 @@ console.log("gbc_fgljp begin");
     });
     _source=source;
     mylog("added eventsource at url:"+url);
+    fgljp.reAdd2=function() {
+      reAddSource(url,false);
+    }
   }
   function closeSource() {
     if (_source) {
@@ -664,37 +682,40 @@ console.log("gbc_fgljp begin");
       addEventSource(url);
     /*}*/
   }
+  function myResourcePath(path, nativePrefix, browserPrefix) {
+    // if path has a scheme, don't change it
+    if (!path || /^(http[s]?|[s]?ftp|data|file|font)/i.test(path)) {
+      return path;
+    }
+    //console.log("wrapResourcePath path:"+path+",nativePrefix:"+nativePrefix+",browserPrefix:"+browserPrefix);
+    //var startPath = (browserPrefix ? browserPrefix + "/" : "");
+    if (nativePrefix == "webcomponents" ) {
+      nativePrefix = "webcomponents/webcomponents";
+    }
+    var startPath = (nativePrefix ? nativePrefix + "/" : "");
+    let returnPath = startPath + path;
+    //console.log("returnPath:"+returnPath);
+    return returnPath;
+  }
   function addGBCPatchesInt(gbc,haveDebuggerFCs) {
     var gbcP=Object.getPrototypeOf(gbc);
     var classes=gbcP.classes;
-    //if ((!_isGBC4) || (_isGBC4 && _gbcMinor_PL<"00.05")) {
+    if (_isGBC5 && gbcWrapper.wrapResourcePath) {
+      gbcWrapper.wrapResourcePath=myResourcePath;
+    } else {
       patchWrapResourcePath(classes); //workaround GBC-3240,GBC-3105
-    //}
+    }
     patchSendUpload(classes);
     if (_isGBC4 && !haveDebuggerFCs) {
       patchNavMan(classes); //add some helpers
     }
+    patchFCURForced(gbc);
     addFGLGBCFrontCalls(gbc);
   }
-
   function patchWrapResourcePath(classes) {
     var VMApplicationP = classes.VMApplication.prototype;
     //wrapResourcePath should mask non conform path symbols such as \ or :
-    VMApplicationP.wrapResourcePath = function(path, nativePrefix, browserPrefix) {
-      // if path has a scheme, don't change it
-      if (!path || /^(http[s]?|[s]?ftp|data|file|font)/i.test(path)) {
-        return path;
-      }
-      //console.log("wrapResourcePath path:"+path+",nativePrefix:"+nativePrefix+",browserPrefix:"+browserPrefix);
-      //var startPath = (browserPrefix ? browserPrefix + "/" : "");
-      if (nativePrefix == "webcomponents" ) {
-        nativePrefix = "webcomponents/webcomponents";
-      }
-      var startPath = (nativePrefix ? nativePrefix + "/" : "");
-      let returnPath = startPath + path;
-      //console.log("returnPath:"+returnPath);
-      return returnPath;
-    }
+    VMApplicationP.wrapResourcePath = myResourcePath;
   }
 
   function patchSendUpload(classes) {
@@ -727,6 +748,20 @@ console.log("gbc_fgljp begin");
       request.send(thefile);
     }
   }
+
+  function patchFCURForced(gbc) {
+     var fcs=gbc.FrontCallService;
+     if (!fcs) {
+       console.warn("patchFC no classes.FrontCallService found");
+       return;
+     }
+     if (fcs.isFrontCallURForced) {
+       fcs.isFrontCallURForced=function() {
+         return true;
+       }
+     }
+  }
+  fgljp.patchFCURForced=patchFCURForced;
 
   function patchNavMan(classes) {
     var navP = classes.VMSessionNavigationManager.prototype;
@@ -813,6 +848,7 @@ console.log("gbc_fgljp begin");
   window.gbc.ThemeService.setValue("theme-sidebar-max-width","100000px");
   var ver=window.gbc.version;
   _isGBC4= parseFloat(ver)>=4.0;
+  _isGBC5= parseFloat(ver)>=5.0;
   var firstDot= ver.indexOf(".");
   myassert(firstDot>=0);
   _gbcMajor = parseInt(ver.substring(0,firstDot));
@@ -833,13 +869,16 @@ console.log("gbc_fgljp begin");
     window.__gbcDefer = function (start) {//only called in "browser" mode by GBC
       mylog("__gbcDefer called in browser mode,_useSSE:"+_useSSE+",start:"+start);
       mylog("gbc ver:"+window.gbc.version+",_isGBC4:"+_isGBC4);
-      if (_useSSE) {
+      if (_useSSE && !_isGBC5) {
         myalert("_useSSE active, not possible to be set in browser mode");
         return;
       }
       addGBCPatches(window.gbc);
       start();
     };
+    if (_isGBC5) {
+      startWrapper();
+    }
   } else {
     startWrapper();
   }
