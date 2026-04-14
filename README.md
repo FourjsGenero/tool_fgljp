@@ -1,6 +1,8 @@
 # fgljp/fglssh
-Genero GAS like proxy to run GBC programs from the command line
+Genero GAS like proxy to run GBC programs from the command line.
+
 The name came originally from fgl (j)ava (p)roxy because a lot of java network API's were used.
+
 Meanwhile all network calls are pure Genero. No Java installation needed anymore.
 To switch to the original implementation using the java-bridge checkout the branch ```java-bridge```.
 (This is only needed if your Genero version is < 4.01.03).
