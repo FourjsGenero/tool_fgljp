@@ -1,7 +1,9 @@
 # fgljp/fglssh
 Genero GAS like proxy to run GBC programs from the command line
-fgl (j)ava (p)roxy 
-Uses loads of IMPORT JAVA 
+fgl (j)ava (p)roxy.
+
+Uses loads of IMPORT JAVA.
+
 Use this branch only if your Genero version is < 4.01.03
 
 (4.01.03 did introduce util.Channels.select + a bunch of other Channel methods,
