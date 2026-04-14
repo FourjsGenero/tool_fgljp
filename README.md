@@ -2,7 +2,10 @@
 Genero GAS like proxy to run GBC programs from the command line
 fgl (j)ava (p)roxy 
 Uses loads of IMPORT JAVA 
-Use this branch only if your Genero version is < 4.10
+Use this branch only if your Genero version is < 4.01.03
+
+(4.01.03 did introduce util.Channels.select + a bunch of other Channel methods,
+see https://4js.com/online_documentation/fjs-fgl-manual-html/?path=fjs-fgl-manual#fgl-topics/c_fgl_ext_util_Channels_methods.html) 
 
 # Motivation
 
