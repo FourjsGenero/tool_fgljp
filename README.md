@@ -44,7 +44,7 @@ Only when starting with the -a argument it listens on the ANY interface (and you
 To be able to work conveniently with remote hosts there is the `fglssh` command in this repository: it establishes a secure ssh tunnel to your Genero development machine and exports FGLSERVER to the remote side.
 
 Prerequisites:
-FGL >= 4.10
+FGL >= 4.01.03
 (Linux: xdg-open in addition)
 on your desktop machine
 
