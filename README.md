@@ -1,6 +1,7 @@
 # fgljp/fglssh
 Genero GAS like proxy to run GBC programs from the command line
-fgl (j)ava (p)roxy.
+
+The name means: fgl (j)ava (p)roxy.
 
 Uses loads of IMPORT JAVA.
 
