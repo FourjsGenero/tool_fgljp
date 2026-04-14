@@ -2,6 +2,7 @@
 Genero GAS like proxy to run GBC programs from the command line
 fgl (j)ava (p)roxy 
 Uses loads of IMPORT JAVA 
+Use this branch only if your Genero version is < 4.10
 
 # Motivation
 
