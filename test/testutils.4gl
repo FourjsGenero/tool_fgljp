@@ -11,7 +11,7 @@ END RECORD
 DEFINE _pid INT
 
 FUNCTION isWin()
-  RETURN os.Path.separator()
+  RETURN os.Path.separator()=="\\"
 END FUNCTION
 
 FUNCTION checkRUN(cmd STRING)

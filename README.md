@@ -1,7 +1,7 @@
 # fgljp/fglssh
 Genero GAS like proxy to run GBC programs from the command line
-fgl (j)ava (p)roxy 
-Uses loads of IMPORT JAVA 
+The name came originally from fgl (j)ava (p)roxy because a lot of java network API's were used.
+Meanwhile all network calls are pure Genero. No Java installation needed anymore.
 
 # Motivation
 
@@ -43,8 +43,7 @@ Only when starting with the -a argument it listens on the ANY interface (and you
 To be able to work conveniently with remote hosts there is the `fglssh` command in this repository: it establishes a secure ssh tunnel to your Genero development machine and exports FGLSERVER to the remote side.
 
 Prerequisites:
-FGL >= 3.10
-JAVA >= 9
+FGL >= 4.10
 (Linux: xdg-open in addition)
 on your desktop machine
 

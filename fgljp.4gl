@@ -1358,7 +1358,7 @@ FUNCTION sendToClient(
   LET hdrs[hdrs.getLength() + 1] = "Vary: Content-Encoding"
   --LET hdrs[hdrs.getLength() + 1] = "X-FourJs-Version: 2.0"
   --LET hdrs[hdrs.getLength() + 1] = "X-FourJs-WebComponent: "|| procId || "/"
-  LET hdrs[hdrs.getLength() + 1] = "X-FourJs-Server: GAS/3.20.14-202012101044"
+  LET hdrs[hdrs.getLength() + 1] = "X-FourJs-Server: GAS/4.20.14-202012101044"
   LET hdrs[hdrs.getLength() + 1] = "X-FourJs-Timeout: 10000"
   LET hdrs[hdrs.getLength() + 1] = "X-FourJs-Request-Result: 10000"
   IF _opt_gdc IS NOT NULL THEN
