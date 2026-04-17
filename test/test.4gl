@@ -72,7 +72,7 @@ END FUNCTION
 FUNCTION menuShowForm(num INT,img STRING)
   DEFINE f64, w64,title STRING
   DEFINE idx INT
-  DISPLAY "menuShowForm ",_arg,",num:",num
+  DISPLAY "menuShowForm ",_arg,",num:",num,",img:",img
   LET title=sfmt("%1.%2",_arg,num)
   MENU title
     BEFORE MENU
@@ -127,6 +127,9 @@ FUNCTION testProcessing()
   FOR i=1 TO 3
     MESSAGE sfmt("Processing %1",i)
     CALL ui.Interface.refresh()
+    IF i==3 THEN
+      CALL ui.Interface.frontCall("standard","feInfo",["feName"],[])
+    END IF
   END FOR
   CLOSE WINDOW processing
 END FUNCTION

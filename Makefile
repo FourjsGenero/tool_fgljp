@@ -32,7 +32,7 @@ endif
 
 all: fgljp.42m mygetopt.42m runonserver.42m getgdcpath.42m fglssh.42m URI.42m
 
-demo: fgljp.42m interrupt.42f demo.42m demo.42f
+demo: fgljp.42m interrupt.42f demo.42m demo.42f simple.42m
 	$(FGLJP) $(VERBOSEARG) demo.42m a b
 
 test/wait_for_fgljp_start.42m:

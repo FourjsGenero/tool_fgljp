@@ -225,7 +225,6 @@ DEFINE _server base.Channel
 DEFINE _channels DYNAMIC ARRAY OF base.Channel
 DEFINE _didAcceptOnce BOOLEAN
 DEFINE _fglserver STRING
-DEFINE _fglfeid STRING
 DEFINE _numWaitingParent INT
 DEFINE _lockMap TStringDict
 DEFINE _numId INT
@@ -294,7 +293,7 @@ MAIN
     CALL setup_program(_opt_program1, priv, pub)
   END IF
   LET _channels[1] = _server
-  WHILE (idx := util.Channels.select(_channels)) <> 0
+  WHILE (idx := doSelect()) <> 0
     CALL log(SFMT("select() did return idx:%1", idx))
     --DISPLAY "idx:",idx
     IF idx == 1 THEN
@@ -315,6 +314,28 @@ MAIN
           util.JSON.stringify(_selDict),
           util.JSON.stringify(_RWWchildren)))
 END MAIN
+
+FUNCTION dataAvailableIndex() RETURNS INT
+  DEFINE i INT
+  FOR i = 1 TO _channels.getLength()
+    VAR chan = _channels[i]
+    IF chan.dataAvailable() THEN
+      --DISPLAY "dataAvailable for chan at:",i
+      RETURN i
+    END IF
+  END FOR
+  RETURN 0
+END FUNCTION
+
+FUNCTION doSelect()
+  DEFINE idx INT
+  LET idx = dataAvailableIndex()
+  IF idx > 0 THEN
+    RETURN idx
+  END IF
+  LET idx = util.Channels.select(channels: _channels)
+  RETURN idx
+END FUNCTION
 
 FUNCTION findFreePortL(startport, local)
   DEFINE startport INT
@@ -397,52 +418,25 @@ FUNCTION canGoOut()
   RETURN FALSE
 END FUNCTION
 
-FUNCTION setup_program_old(priv STRING, pub STRING, port INT)
-  DEFINE s, arg1, cmd, fglrun STRING
-  DEFINE code INT
-  LET _progdir = os.Path.fullPath(os.Path.dirName(_opt_program1))
-  LET _pubdir = _progdir
-  LET _privdir = os.Path.join(_progdir, "priv")
-  CALL os.Path.mkdir(_privdir) RETURNING status
-  CALL fgl_setenv("FGLSERVER", SFMT(_localhost || ":%1", port - 6400))
-  CALL fgl_setenv("FGL_PRIVATE_DIR", _privdir)
-  CALL fgl_setenv("FGL_PUBLIC_DIR", _pubdir)
-  CALL fgl_setenv("FGL_PUBLIC_IMAGEPATH", ".")
-  CALL fgl_setenv("FGL_PRIVATE_URL_PREFIX", priv)
-  CALL fgl_setenv("FGL_PUBLIC_URL_PREFIX", pub)
-  IF _fglfeid IS NULL THEN
-    LET _fglfeid = genSID(TRUE)
-    CALL fgl_setenv("_FGLFEID", _fglfeid)
-  END IF
-  --CALL fgl_setenv("FGLGUIDEBUG", "1")
-  --CALL fgl_setenv("FGLGUIDEBUG", "1")
-  --should work on both Win and Unix
-  --LET s= "cd ",_progdir,"&&fglrun ",os.Path.baseName(prog)
-  LET arg1 = os.Path.fullPath(_opt_program1.trim())
-  LET cmd = "fglrun -r ", quote(arg1), IIF(isWin(), ">NUL", " >/dev/null 2>&1")
-  --we check if we can deassemble the file, this works for .42m and .42r
-  --DISPLAY "cmd:",cmd
-  RUN cmd RETURNING code
-  --if code is set the 1st arg is not a valid .42m or .42r
-  LET fglrun = IIF(code, "", "fglrun ")
-  LET s = SFMT("%1%2", fglrun, _opt_program)
-  CALL log(SFMT("RUN:'%1' WITHOUT WAITING", s))
-  RUN s WITHOUT WAITING
-END FUNCTION
-
 FUNCTION setup_program(program1 STRING, priv STRING, pub STRING)
   DEFINE s, arg1, cmd, fglrun STRING
   DEFINE code INT
   VAR progdir = os.Path.fullPath(os.Path.dirName(program1))
   LET _pubdir = os.Path.join(progdir, "pub")
-  LET _privdir = os.Path.join(progdir, "priv")
-  CALL os.Path.mkdir(_privdir) RETURNING status
+  --LET _privdir = os.Path.join(progdir, "priv")
+  LET _privdir = os.Path.makeTempName(), "_priv"
+  IF NOT os.Path.mkdir(_privdir) THEN
+    DISPLAY "Warning: can't create priv dir:", _privdir
+  ELSE
+    CALL log(sfmt("setup_program created priv dir:%1", _privdir))
+  END IF
   CALL fgl_setenv("FGLSERVER", SFMT(_localhost || ":%1", _port - 6400))
   CALL fgl_setenv("FGL_PRIVATE_DIR", _privdir)
   CALL fgl_setenv("FGL_PUBLIC_DIR", _pubdir)
   CALL fgl_setenv("FGL_PUBLIC_IMAGEPATH", "pub")
   CALL fgl_setenv("FGL_PRIVATE_URL_PREFIX", priv)
   CALL fgl_setenv("FGL_PUBLIC_URL_PREFIX", pub)
+  CALL fgl_setenv("FGL_WEBSERVER_HTTP_USER_AGENT", "fgljp")
   {
   IF _fglfeid IS NULL THEN
     LET _fglfeid = genSID(TRUE)
@@ -460,7 +454,7 @@ FUNCTION setup_program(program1 STRING, priv STRING, pub STRING)
   --if code is set the 1st arg is not a valid .42m or .42r
   LET fglrun = IIF(code, "", "fglrun ")
   LET s = SFMT("%1%2", fglrun, _opt_program)
-  CALL log(SFMT("xRUN:'%1' WITHOUT WAITING", s))
+  CALL log(SFMT("setup_program RUN:'%1' WITHOUT WAITING", s))
   RUN s WITHOUT WAITING
 END FUNCTION
 
@@ -763,6 +757,10 @@ FUNCTION parseHttpLine(x TConn INOUT, s STRING)
     LET x.query = util.Strings.urlDecode(x.query)
   END IF
   LET path = IIF(qidx > 0, path.subString(1, qidx - 1), path)
+  --remote mode: we keep % encoding in the path
+  IF _opt_program IS NOT NULL THEN
+    LET path = checkDecode(path)
+  END IF
   LET x.path = path
   CALL log(SFMT("parseHttpLine:%1 %2", s, printSel(x)))
   IF a[3] <> "HTTP/1.1" THEN
@@ -1353,7 +1351,8 @@ FUNCTION sendToClient(
   LET hdrs[hdrs.getLength() + 1] = "Expires: -1"
   LET hdrs[hdrs.getLength() + 1] = "X-XSS-Protection: 1; mode=block"
   LET hdrs[hdrs.getLength() + 1] = "Cache-Control: no-cache, no-store"
-  LET hdrs[hdrs.getLength() + 1] = "Transfer-Encoding: Identity"
+  --Safari doesn't like this:
+  --LET hdrs[hdrs.getLength() + 1] = "Transfer-Encoding: Identity"
   LET hdrs[hdrs.getLength() + 1] = "X-Content-Type-Options: nosniff"
   LET hdrs[hdrs.getLength() + 1] = "Vary: Content-Encoding"
   --LET hdrs[hdrs.getLength() + 1] = "X-FourJs-Version: 2.0"
@@ -1443,15 +1442,15 @@ FUNCTION sendToClient(
 END FUNCTION
 
 FUNCTION handleGBCPath(x TConn INOUT, path STRING) RETURNS BOOLEAN
-  DEFINE fname, pathCut STRING
+  DEFINE fname STRING
   DEFINE cut BOOLEAN
   DEFINE idx1, idx2, idx3 INT
   LET cut = TRUE
-  LET pathCut = cut_question(path)
+  --DISPLAY "handleGBCPath:", path
   CASE
-    WHEN pathCut == "/gbc/index.html"
+    WHEN path == "/gbc/index.html"
       CALL setAppCookie(x, path)
-    WHEN pathCut == "/gbc/gbc_fgljp.js"
+    WHEN path == "/gbc/gbc_fgljp.js"
         AND os.Path.exists((fname := os.Path.join(_owndir, "gbc_fgljp.js")))
       CALL log(SFMT("handleGBCPath: process our gbc_fglp bootstrap:%1", fname))
       RETURN processFile(x: x, fname: fname, cache: TRUE, checkExists: TRUE)
@@ -1523,6 +1522,9 @@ FUNCTION invokeHttpHandler(x TConn INOUT, path STRING)
       RETURN handleGBCPath(x: x, path: path)
     WHEN path.getIndexOf("/putfile/", 1) == 1 --gdc putfile
       RETURN handleGDCPutFile(x, path.subString(9, path.getLength()))
+    WHEN startsWith(s: x.path, sub: "/priv/") --priv dir access
+      CALL printRequest(x, "handlePriv")
+      RETURN handlePrivPath(x, path)
   END CASE
   MYASSERT(NOT x.state.equals(S_FINISH))
   VAR ret = FALSE
@@ -1558,6 +1560,38 @@ IF NOT _sidCookie.equals(_s[x].sidCookie)
 END IF
 }
 
+FUNCTION checkDecode(fname STRING) RETURNS STRING
+  IF fname.getIndexOf("%",1)>0 THEN
+    RETURN util.Strings.urlDecode(fname)
+  END IF
+  RETURN fname
+END FUNCTION
+
+FUNCTION handlePrivPath(x TConn INOUT, path STRING) RETURNS BOOLEAN
+  DEFINE fname STRING
+  CALL log(
+      SFMT("handlePrivPath:%1,_privdir:%2,x.ftLockFile:%3",
+          path, _privdir, x.ftLockFile))
+  LET fname = path.subString(7, path.getLength())
+  --LET fname = checkDecode(fname)
+  LET fname = os.Path.join(_privdir, fname)
+  RETURN checkLockFile(x, fname)
+END FUNCTION
+
+FUNCTION checkLockFile(x TConn INOUT, fname STRING) RETURNS BOOLEAN
+  VAR locked = ""
+  CASE
+    WHEN NOT x.ftLockFile AND (locked := _lockMap[pathWithQuery(x)]) IS NOT NULL
+      RETURN handleLockedFile(x, locked)
+    WHEN x.ftLockFile
+      IF NOT os.Path.exists(fname) THEN
+        RETURN http404(x, fname)
+      END IF
+      RETURN lockFile(x, fname)
+  END CASE
+  RETURN processFile(x, fname, TRUE, TRUE)
+END FUNCTION
+
 --fglrun creates a tmp file for the short while of a frontcall
 --as GBC doesn't control *when* the download takes place we must
 --store the file somewehere else
@@ -1585,18 +1619,20 @@ FUNCTION handleLockedFile(x TConn INOUT, locked STRING) RETURNS BOOLEAN
 END FUNCTION
 
 FUNCTION findFile(x TConn INOUT, path STRING) RETURNS BOOLEAN
-  DEFINE qidx INT
+  --DEFINE qidx INT
   DEFINE relpath STRING
+  {
   LET qidx = path.getIndexOf("?", 1)
   IF qidx > 0 THEN
     LET path = path.subString(1, qidx - 1)
   END IF
+  }
   VAR locked = ""
   IF NOT x.ftLockFile
       AND (locked := _lockMap[pathWithQuery(x)]) IS NOT NULL THEN
     RETURN handleLockedFile(x, locked)
   END IF
-  LET path = util.Strings.urlDecode(path)
+  --LET path = checkDecode(path)
   LET relpath = ".", path
   IF NOT os.Path.exists(relpath) THEN
     CALL log(
@@ -1613,7 +1649,59 @@ FUNCTION findFile(x TConn INOUT, path STRING) RETURNS BOOLEAN
   RETURN processFile(x: x, fname: relpath, cache: TRUE, checkExists: FALSE)
 END FUNCTION
 
+CONSTANT WEBCOS_S = "/webcomponents/"
+CONSTANT WEBCOS = "webcomponents/"
+FUNCTION lookupInFGLQA_WC_TEMPDIR(fname STRING) RETURNS STRING
+  VAR WCtmpDir = fgl_getenv("FGLQA_WC_TEMPDIR")
+  IF WCtmpDir IS NULL THEN
+    RETURN NULL
+  END IF
+  --we come in with "webcomponents/..."
+  VAR tmpName = fname.subString(WEBCOS.getLength() + 1, fname.getLength())
+  VAR trial = ""
+  IF os.Path.exists(trial := os.Path.join(WCtmpDir, tmpName)) THEN
+    RETURN trial
+  ELSE
+    CALL log(
+        SFMT("lookupInFGLQA_WC_TEMPDIR fname:%1,tmpName:%2,trial:%3 in tmpDir:%4 doesn't exist",
+            fname, tmpName, trial, WCtmpDir))
+  END IF
+  RETURN NULL
+END FUNCTION
+
 FUNCTION gbcResourceName(fname STRING)
+  DEFINE trial, idxwc STRING
+  CASE
+    WHEN (idxwc := fname.getIndexOf(WEBCOS_S, 1)) > 0
+      LET fname = fname.subString(idxwc + 1, fname.getLength())
+      MYASSERT(fname.getIndexOf(WEBCOS, 1) == 1)
+      --LET fname=checkDecode(fname)
+      --first look in <programdir>/webcomponents
+      CASE
+        WHEN _progdir IS NOT NULL
+            AND os.Path.exists(trial := os.Path.join(_progdir, fname))
+          LET fname = trial
+        WHEN os.Path.exists(trial := os.Path.join(fgl_getenv("FGLDIR"), fname))
+          LET fname = trial
+        WHEN (trial := lookupInFGLQA_WC_TEMPDIR(fname)) IS NOT NULL
+          LET fname = trial
+      END CASE
+      --WHEN fname == "js/gbc.bootstrap.js"
+      --  DISPLAY "!!fake bootstrap"
+      --  LET fname = os.Path.join(_owndir, "gbc.bootstrap.js")
+    OTHERWISE
+      IF base.Application.isMobile() THEN
+        --gwadev: getGBCDIR raises an exception on mobile
+        --let end in nirwana for now
+        LET fname = "__mobileNotFound/", fname
+      ELSE
+        LET fname = os.Path.join(_gbcdir, fname)
+      END IF
+  END CASE
+  RETURN fname
+END FUNCTION
+
+FUNCTION gbcResourceNameOld(fname STRING)
   DEFINE trial STRING
   CASE
     WHEN fname.getIndexOf("webcomponents", 1) > 0
@@ -2130,7 +2218,7 @@ FUNCTION writeHTTPFile(x TConn INOUT, fn STRING, ctlen INT) RETURNS BOOLEAN
   LET c = base.Channel.create()
   CALL c.openFile(fn, "r")
   LET numBytes = os.Path.size(fn)
-  MYASSERT(os.Path.size(fn) == ctlen)
+  MYASSERT_MSG(os.Path.size(fn) == ctlen, sfmt("os.Path.size(%1) is:%2 <> ctlen:%3", fn, os.Path.size(fn), ctlen))
   VAR written = util.Channels.copyN(c, chan, ctlen)
   CALL log(
       SFMT("writeHTTPFile: Did write:%1 of len:%2,fn:%3 x:%4",
@@ -2358,9 +2446,11 @@ FUNCTION checkCDAttachment(x TConn INOUT, hdrs TStringArr)
     RETURN
   END IF
   LET path = x.path
+  {
   LET qidx = path.getIndexOf("?", 1)
   LET path = IIF(qidx > 0, path.subString(1, qidx - 1), path)
-  LET path = util.Strings.urlDecode(path)
+  }
+  --LET path = checkDecode(path)
   LET fname = os.Path.baseName(path)
   --DISPLAY ">>>>>>>>>>>>send attach:", path, ",fname:", fname
   LET qidx = hdrs.getLength() + 1
@@ -4509,7 +4599,7 @@ FUNCTION checkCached4Fmt(src STRING) RETURNS(BOOLEAN, STRING, INT, INT)
   LET lastQ = lastIndexOf(mid, "?")
   VAR query = mid.subString(lastQ + 1, mid.getLength())
   VAR d = getQueryDict(query)
-  MYASSERT(d.getLength() >= 2)
+  MYASSERT_MSG(d.getLength() >= 2,sfmt("query:%1 in mid:%2 has not 2 params",query,mid))
   IF d.getLength() == 0 THEN
     RETURN FALSE, NULL, 0, 0
   END IF

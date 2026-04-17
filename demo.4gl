@@ -1,7 +1,7 @@
 IMPORT FGL fgldialog
 MAIN
-  DEFINE arg, win, uploaded STRING
-  DEFINE num, idleCount, uploadCount INT
+  DEFINE arg, win, uploaded,name STRING
+  DEFINE num, idleCount, uploadCount, code INT
   DEFER INTERRUPT
   OPTIONS ON CLOSE APPLICATION CALL myexit
   LET arg = arg_val(1)
@@ -42,6 +42,11 @@ MAIN
       MESSAGE "Sleep done"
     COMMAND "Processing"
       CALL testProcessing()
+      MESSAGE "Processing ok"
+    COMMAND "Processing+sub"
+      CALL testProcessing()
+      RUN "fglrun simple" RETURNING code
+      MESSAGE "Processing + simple ok, code:",code
     COMMAND "sub"
       CALL sub()
     ON ACTION message ATTRIBUTE(IMAGE = "smiley", TEXT = "Message+DISPLAY")
@@ -74,6 +79,10 @@ MAIN
       CALL showForm("logo.png")
     COMMAND "RUN"
       RUN SFMT("fglrun demo %1 %2", arg || "+", arg_val(2))
+    COMMAND "RUN simple"
+      RUN "fglrun simple" RETURNING code
+      CALL ui.Interface.frontCall("standard","feInfo",["feName"],[name])
+      MESSAGE "code:",code,",name:",name
     COMMAND "RUN WITHOUT WAITING"
       RUN SFMT("fglrun demo %1 %2", arg || "+", arg_val(2)) WITHOUT WAITING
     COMMAND "putfile"
@@ -131,13 +140,26 @@ FUNCTION sub()
   END MENU
 END FUNCTION
 
-FUNCTION testProcessing()
+FUNCTION testProcessingOld()
   DEFINE i INT
   OPEN WINDOW processing AT 1, 1 WITH 10 ROWS, 10 COLUMNS
   FOR i = 1 TO 3
     MESSAGE SFMT("Processing %1", i)
     CALL ui.Interface.refresh()
     SLEEP 1
+  END FOR
+  CLOSE WINDOW processing
+END FUNCTION
+
+FUNCTION testProcessing()
+  DEFINE i INT
+  OPEN WINDOW processing AT 1,1 WITH 10 ROWS,10 COLUMNS
+  FOR i=1 TO 3
+    MESSAGE sfmt("Processing %1",i)
+    CALL ui.Interface.refresh()
+    IF i=3 THEN
+      CALL ui.Interface.frontCall("standard","feInfo",["feName"],[])
+    END IF
   END FOR
   CLOSE WINDOW processing
 END FUNCTION
