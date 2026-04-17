@@ -1879,6 +1879,8 @@ FUNCTION processFile(
           LET ct = "application/octet-stream"
         WHEN ext == "svg"
           LET ct = "image/svg+xml"
+        WHEN ext == "pdf"
+          LET ct = "application/pdf"
       END CASE
       LET hdrs = getCacheHeaders(cache, etag)
       --DISPLAY "processFile:", fname, " ct:", ct
