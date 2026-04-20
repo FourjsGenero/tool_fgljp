@@ -152,6 +152,45 @@ If -b (or --bash) is used because bash is present remotely, FGLSERVER is automat
 
 In all other cases you need to use one of the known 'direct shortcut tags' described in tge GDC manual (see http://4js.com/online_documentation/fjs-gdc-manual-html/#gdc-topics/t_gdc_applications_shortcuts_creating_direct.html)
 
+# Command Line Arguments
+
+## fgljp
+
+```
+Usage: fgljp [options] ?program? ?arg? ?arg?
+
+Options:
+    -o, --startfile <arg>     JSON file with start info (port,pid,FGLSERVER) if no program is directly started
+    -V, --version             Version information
+    -h, --help                program help
+    -v, --verbose             detailed log
+    -p, --port <arg>          Listening port
+    -l, --logfile <arg>       File written for logs and success
+    -r, --runonserver         connects GMI/GMA via runonserver to the spawned program (internal dev)
+    -g, --gdc                 connects GDC to the spawned program (internal dev)
+    -n, --nostart             spawns the program and displays the program URL on stdout
+    -X, --autoclose           If the connection ends fgljp closes
+    -x, --clear-cache         Clears the file transfer cache
+    -a, --listen-any          fgljp is reachable from outside
+```
+
+## fglssh
+
+```
+Usage: fglssh [options] <remote host> ?ssh_command?
+
+Options:
+    -t, --tunnel-only         invokes fgljp, tunnels to remote and prints FGLSERVER
+    -b, --bash                starts a remote interactive bash (avoids editing sshd_config for AcceptEnv)
+    -h, --help                program help
+    -p, --port <arg>          remote ssh port number
+    -l, --login-name <arg>    remote ssh user
+    -y, --fgltty <arg>        use fgltty instead of ssh
+    -x, --fgltty-password <arg>  clear text password for fgltty
+    -v, --verbose             detailed log
+        --load <arg>          load a fgltty config
+```
+
 # Known problems
 Currently its impossible to terminate fgljp with Control-c in the windows console (see FGL issue FGL-5697).
 One needs to use `taskkill /f /im fglrun.exe` currently to terminate the process.
