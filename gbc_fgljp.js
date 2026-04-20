@@ -311,6 +311,7 @@ console.log("gbc_fgljp begin");
     if (Boolean(procId)) {
       _procId=procId;
     }
+    //setProcIdCookie(procId,"sendPOST");
     sendAjax(events.trim()+"\n","POST");
     _procId=null;
   }
@@ -415,6 +416,27 @@ console.log("gbc_fgljp begin");
     fgljp.getcurrentwindow=window.gbc.FrontCallService.modules.debugger.getcurrentwindow;
    
   }
+  /*
+  function setProcIdCookie(procId,where) {
+    const cook = "GENERO_PROCID=" + procId + "; Path=/";
+    console.info("set procId:%o,where:%o",cook,where);
+    document.cookie = cook;
+  }
+  function setCurrentProcId() {
+    try {
+      const nav=getNavMan();
+      const win=nav.getCurrentWindow();
+      if (win) {
+        const app=win.getApplication();
+        const procId=app.procId;
+        _procId = procId;
+        setProcIdCookie(procId,"setCurrentProcId");
+      }
+    } catch(err) {
+      console.warn("setCurrentProcId err:%o",err);
+    }
+  }
+  */
   function myMeta(meta) {
     mylog("myMeta:"+meta);
     var obj={nativeResourcePrefix: "___",
@@ -476,6 +498,7 @@ console.log("gbc_fgljp begin");
           }, 500);
         }*/
       }
+      //setCurrentProcId();
     }
     window.gbcWrapper.interrupt = function(data) {
       urlog("gbcWrapper.interrupt:"+tryJSONs(data));
@@ -687,7 +710,7 @@ console.log("gbc_fgljp begin");
     if (!path || /^(http[s]?|[s]?ftp|data|file|font)/i.test(path)) {
       return path;
     }
-    //console.log("wrapResourcePath path:"+path+",nativePrefix:"+nativePrefix+",browserPrefix:"+browserPrefix);
+    //console.log("myResourcePath path:"+path+",nativePrefix:"+nativePrefix+",browserPrefix:"+browserPrefix+",_procId:"+_procId);
     //var startPath = (browserPrefix ? browserPrefix + "/" : "");
     if (nativePrefix == "webcomponents" ) {
       nativePrefix = "webcomponents/webcomponents";

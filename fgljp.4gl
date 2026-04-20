@@ -428,7 +428,7 @@ FUNCTION setup_program(program1 STRING, priv STRING, pub STRING)
   IF NOT os.Path.mkdir(_privdir) THEN
     DISPLAY "Warning: can't create priv dir:", _privdir
   ELSE
-    CALL log(sfmt("setup_program created priv dir:%1", _privdir))
+    CALL log(SFMT("setup_program created priv dir:%1", _privdir))
   END IF
   CALL fgl_setenv("FGLSERVER", SFMT(_localhost || ":%1", _port - 6400))
   CALL fgl_setenv("FGL_PRIVATE_DIR", _privdir)
@@ -1418,6 +1418,7 @@ FUNCTION sendToClient(
     --fetched by the client sends the right cookie back
     --DISPLAY "write vm side cookie:",SetCookieHdr(procId)," ",x.path
     LET hdrs[hdrs.getLength() + 1] = SetCookieHdr(APP_COOKIE, procId)
+    --CALL log(SFMT("sendToClient:send APP_COOKIE GENERO_APP:%1", procId))
     LET x.appCookie = NULL --avoid sending session id later
   END IF
   CALL checkSIDHdr(hdrs)
@@ -1745,6 +1746,44 @@ FUNCTION getRUNChildIdx(vmidx INT)
   END IF
 END FUNCTION
 
+#+ the situation arrives if a child app dies and a parent/previous app is
+#+ raised
+#+ to solve this cleanly VM resources would need a query string for the procId...
+FUNCTION getFreeVMIndexForDeadVM(v TVMRec INOUT, fname STRING) RETURNS INT
+  VAR vmidx = 0
+  IF fname.getIndexOf("__VM__/", 1) == 1
+      OR fname.getIndexOf("webcomponents/", 1) == 1 THEN
+    --first check parent index
+    VAR i = 0
+    {
+    FOR i = 1 TO _v.getLength()
+      DISPLAY SFMT("vm at:%1:%2", i, printVIdx(i))
+    END FOR
+    }
+    VAR ppIdx = _v.search(key: "procId", value: v.procIdParent)
+    IF ppIdx > 0
+        AND _v[ppIdx].state == S_ACTIVE
+        AND _v[ppIdx].wait == FALSE THEN
+      CALL log(
+          SFMT("getFreeVMIndexForDeadVM use parent VM :%1 for fname:%2",
+              printVIdx(ppIdx), fname))
+      RETURN ppIdx
+    END IF
+    FOR i = 1 TO _v.getLength()
+      IF _v[i].state == S_ACTIVE AND _v[i].wait == FALSE THEN
+        LET vmidx = i
+        CALL log(
+            SFMT("getFreeVMIndexForDeadVM use VM:%1, for fname:%2",
+                printVIdx(ppIdx), fname))
+        EXIT FOR
+        --ELSE
+        --  DISPLAY SFMT("VM at:%1:%2", i, printVIdx(i))
+      END IF
+    END FOR
+  END IF
+  RETURN vmidx
+END FUNCTION
+
 FUNCTION vmidxFromAppCookie(x TConn INOUT, fname STRING) RETURNS INT
   DEFINE vmidx INT
   LET vmidx = vmidxFromAppCookieInt(x, fname)
@@ -1757,7 +1796,8 @@ FUNCTION vmidxFromAppCookie(x TConn INOUT, fname STRING) RETURNS INT
       CALL log(
           SFMT("vmidxFromAppCookie: caught vmidx for dead VM:%1, fname:%2",
               printVIdx(vmidx), fname))
-      RETURN 0
+      LET vmidx = getFreeVMIndexForDeadVM(v: _v[vmidx], fname)
+      --LET vmidx = 0
     END IF
   END IF
   RETURN vmidx
@@ -1833,33 +1873,36 @@ FUNCTION processFile(
   IF found_index THEN
     RETURN ret
   END IF
+  IF x.method == "GET"
+      AND (x.path == "/gbc/js/gbc.js" OR x.path == "gbc://js/gbc.js") THEN
+    --DISPLAY "!!!!processGBCJS:",fname
+    RETURN process_gbc_js(x, fname)
+  END IF
   IF cache THEN
     LET etag = SFMT("%1.%2", os.Path.mtime(fname), os.Path.size(fname))
     IF x.clitag IS NOT NULL AND x.clitag == etag THEN
       RETURN sendNotModified(x, fname, etag)
     END IF
   END IF
-  IF x.method == "GET"
-      AND (x.path == "/gbc/js/gbc.js" OR x.path == "gbc://js/gbc.js") THEN
-    --DISPLAY "!!!!processGBCJS:", x, " ", fname
-    RETURN process_gbc_js(x, fname, etag)
-  END IF
   LET ext = os.Path.extension(fname)
   LET ct = NULL
   CASE
     WHEN ext == "html"
+        OR ext == "htm"
         OR ext == "css"
         OR ext == "js"
+        OR ext == "mjs"
         OR ext == "txt"
         OR ext == "svg"
+        OR ext == "log"
       CASE
-        WHEN ext == "html"
+        WHEN ext == "html" OR ext == "htm"
           LET ct = "text/html"
-        WHEN ext == "js"
+        WHEN ext == "js" OR ext == "mjs"
           LET ct = "application/x-javascript"
         WHEN ext == "css"
           LET ct = "text/css"
-        WHEN ext == "txt"
+        WHEN ext == "txt" OR ext == "log"
           LET ct = "text/plain"
         WHEN ext == "svg"
           LET ct = "image/svg+xml"
@@ -1873,14 +1916,26 @@ FUNCTION processFile(
       CASE
         WHEN ext == "gif"
           LET ct = "image/gif"
+        WHEN ext == "png"
+          LET ct = "image/png"
+        WHEN ext == "jpg"
+          LET ct = "image/jpeg"
+        WHEN ext == "jpeg"
+          LET ct = "image/jpeg"
         WHEN ext == "woff"
           LET ct = "application/font-woff"
         WHEN ext == "ttf"
           LET ct = "application/octet-stream"
-        WHEN ext == "svg"
-          LET ct = "image/svg+xml"
+        WHEN ext == "wasm"
+          LET ct = "application/wasm"
         WHEN ext == "pdf"
           LET ct = "application/pdf"
+        WHEN ext == "mp4"
+          LET ct = "video/mp4"
+        WHEN ext == "avi"
+          LET ct = "video/x-msvideo"
+        WHEN ext == "mov"
+          LET ct = "video/quicktime"
       END CASE
       LET hdrs = getCacheHeaders(cache, etag)
       --DISPLAY "processFile:", fname, " ct:", ct
@@ -1980,7 +2035,7 @@ END FUNCTION
 --(insert an unload handler)
 --GBC's unload handlers otherwise don't let us get a foot into the door
 FUNCTION process_gbc_js(
-    x TConn INOUT, gbc_js STRING, etag STRING)
+    x TConn INOUT, gbc_js STRING)
     RETURNS BOOLEAN
   DEFINE txt STRING
   DEFINE hdrs TStringArr
@@ -1988,7 +2043,25 @@ FUNCTION process_gbc_js(
   LET txt =
       '"use strict";\nwindow.addEventListener("unload",function(e) {\nconsole.log("process gbc_fgljp_unload gbc");\ntry { window.gbc_fgljp_unload();\n} catch(err) {\nconsole.warn("process gbc_fgljp_unload error:"+err.msg);\n}\n});\n'
   LET txt = txt, readTextFile(gbc_js)
-  LET hdrs = getCacheHeaders(TRUE, etag)
+  --fix GBC-5862
+  VAR search="result.needLayout = result.needLayout || Boolean(cls.LayoutTriggerAttributes[cmd.type][toDestroy._tag])"
+  VAR toDestroyFix="result.needLayout = result.needLayout || Boolean(toDestroy?(cls.LayoutTriggerAttributes[cmd.type][toDestroy._tag]):false)"
+  VAR oldtxt=txt
+  LET txt = replace(src: txt,oldStr: search, newString: toDestroyFix)
+  IF NOT oldtxt.equals(txt) THEN
+    CALL log("did patch GBC-5862 with spaces")
+  ELSE
+    --remove spaces in search
+    LET search= replace(src: search,oldStr: " ",newString: "")
+    --now again substitute
+    LET txt = replace(src: txt,oldStr: search, newString: toDestroyFix)
+    IF NOT oldtxt.equals(txt) THEN
+      CALL log("did patch GBC-5862 without spaces")
+    ELSE
+      CALL log("no GBC-5862 patch applied")
+    END IF
+  END IF
+  LET hdrs = getCacheHeaders(FALSE, NULL)
   RETURN writeResponseCtHdrs(x, txt, "application/x-javascript", hdrs)
 END FUNCTION
 
@@ -2165,7 +2238,7 @@ FUNCTION handleBrowserClose(x TConn INOUT, sessId STRING)
   DEFINE i INT
   CALL log(SFMT("handleBrowserClose:%1 sessId:%2", printSel(x), sessId))
   FOR i = 1 TO _v.getLength()
-    IF _v[i].sessId == sessId THEN
+    IF _v[i].sessId == sessId AND _v[i].chan IS NOT NULL THEN
       CALL writeToVM(_v[i], CLIENT_CLOSE)
     ELSE
       --CALL dlog(SFMT("vm idx:%1 has sessId:%2", printV(i), _v[i].sessId))
@@ -2205,9 +2278,11 @@ END FUNCTION
 FUNCTION writeToVMNoEncaps(v TVMRec INOUT, s STRING)
   DEFINE chan base.Channel
   LET chan = v.chan
+  --IF _channels.search(NULL, chan)>0 THEN
   MYASSERT(_channels.search(NULL, chan) > 0)
   CALL chan.writeNoNL(s)
   CALL chan.flush()
+  --END IF
   --DISPLiY SFMT("writeToVMNoEncaps vmidx:%1 s:'%2'", vmidx, s)
 END FUNCTION
 
@@ -3292,9 +3367,12 @@ FUNCTION createFO(
     RETURNS(base.Channel, STRING, STRING)
   DEFINE fo base.Channel
   DEFINE err STRING
-  IF NOT forceAbsolute AND path.getIndexOf("/", 1) == 1 THEN
-    LET path = ".", path
-  END IF
+  CASE
+    WHEN path.getIndexOf("/priv/", 1) == 1 AND _opt_program IS NOT NULL
+      LET path = os.Path.join(_privdir, path.subString(7, path.getLength()))
+    WHEN NOT forceAbsolute AND path.getIndexOf("/", 1) == 1
+      LET path = ".", path
+  END CASE
   LET fo = base.Channel.create()
   TRY
     CALL fo.openFile(path, "wb")
@@ -4866,10 +4944,11 @@ FUNCTION lookupNextImage(v TVMRec INOUT)
       OR (len == 0)
       OR (v.writeC IS NOT NULL) THEN
     IF v.writeNum == 0 AND len == 0 AND v.writeC IS NULL THEN
-      CALL log("lookupNextImage: all files transferred!")
+      CALL log(SFMT("lookupNextImage: all files transferred!, wait:%1", v.wait))
     ELSE
       CALL log(SFMT("  v.writeNum(%1) != 0, wait:%2", v.writeNum, v.wait))
     END IF
+    CALL checkToVMCmd(v) RETURNING status
     RETURN
   END IF
   MYASSERT(FTs.getLength() > 0)
