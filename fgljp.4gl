@@ -3499,7 +3499,7 @@ FUNCTION handleMultiPartUpload(
   --special case: as there is only one file we redirect everything
   --except the end boundary into the tmpfile
   VAR written = util.Channels.copyN(chan, fo, maxToRead - blen)
-  --DISPLAY SFMT("did write:%1 to:%2", written, path)
+  CALL log(SFMT("handleMultiPartUpload: did write:%1 to:%2", written, path))
   VAR boundary2 = chan.readOctets(length: blen)
   {
   DISPLAY "boundary2:'", boundary2, "',boundary:'", boundary, "'"
