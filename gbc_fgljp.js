@@ -441,7 +441,7 @@ console.log("gbc_fgljp begin");
     mylog("myMeta:"+meta);
     var obj={nativeResourcePrefix: "___",
              meta:meta,
-             forcedURfrontcalls:{},
+             forcedURfrontcalls: window.gbcWrapper._forcedURfrontcalls,
              debugMode:1,
              logLevel:_verbose?4:2};
     _lastMeta = meta;

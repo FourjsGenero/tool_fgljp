@@ -229,6 +229,7 @@ DEFINE _numWaitingParent INT
 DEFINE _lockMap TStringDict
 DEFINE _numId INT
 DEFINE _direct_mode BOOLEAN
+DEFINE _run_cnt INT
 
 --Parser state record
 TYPE TclP RECORD
@@ -368,7 +369,7 @@ FUNCTION printV(v TVMRec INOUT) RETURNS STRING
     RETURN ""
   END IF
   LET diff = CURRENT - v.starttime
-  RETURN SFMT("{VM id:%1 vmidx:%2 s:%3 procId:%4 t:%5 pp:%6 pw:%7 wait:%8 progName:%9}",
+  RETURN SFMT("{VM id:%1 vmidx:%2 s:%3 procId:%4 t:%5 pp:%6 pw:%7 ppw:%8 wait:%9 progName:%10 sessId:%11}",
       v.id,
       v.vmidx,
       v.state,
@@ -376,8 +377,10 @@ FUNCTION printV(v TVMRec INOUT) RETURNS STRING
       diff,
       v.procIdParent,
       v.procIdWaiting,
+      v.procIdParentWaiting,
       v.wait,
-      v.programName)
+      v.programName,
+      v.sessId)
 END FUNCTION
 
 FUNCTION printSel(x TConn INOUT) RETURNS STRING
@@ -437,13 +440,6 @@ FUNCTION setup_program(program1 STRING, priv STRING, pub STRING)
   CALL fgl_setenv("FGL_PRIVATE_URL_PREFIX", priv)
   CALL fgl_setenv("FGL_PUBLIC_URL_PREFIX", pub)
   CALL fgl_setenv("FGL_WEBSERVER_HTTP_USER_AGENT", "fgljp")
-  {
-  IF _fglfeid IS NULL THEN
-    LET _fglfeid = genSID(TRUE)
-    CALL fgl_setenv("_FGLFEID", _fglfeid)
-  END IF
-  }
-  --CALL fgl_setenv("FGLGUIDEBUG", "1")
   --CALL fgl_setenv("FGLGUIDEBUG", "1")
   VAR program = program1.trim()
   LET arg1 = os.Path.fullPath(program)
@@ -453,7 +449,10 @@ FUNCTION setup_program(program1 STRING, priv STRING, pub STRING)
   RUN cmd RETURNING code
   --if code is set the 1st arg is not a valid .42m or .42r
   LET fglrun = IIF(code, "", "fglrun ")
-  LET s = SFMT("%1%2", fglrun, _opt_program)
+  LET _run_cnt = _run_cnt + 1
+  VAR feid = SFMT("FEID%1_%2", currentStr(), _run_cnt)
+  VAR fenv = SFMT("%1 _FGLFEID=%2", IIF(isWin(), "set", "export"), feid)
+  LET s = SFMT("%1&&%2%3", fenv, fglrun, _opt_program)
   CALL log(SFMT("setup_program RUN:'%1' WITHOUT WAITING", s))
   RUN s WITHOUT WAITING
 END FUNCTION
@@ -882,8 +881,9 @@ FUNCTION checkNewTasks(v TVMRec INOUT) RETURNS INT
       OR (sessId := v.sessId) IS NULL
       OR NOT _RWWchildren.contains(sessId)
       OR _RWWchildren[sessId].getLength() == 0 THEN
-    --DISPLAY SFMT("checkNewTasks:_newtasks:%1 sessId:%2 _RWWchildren:%3",
-    --    _newtasks, sessId, util.JSON.stringify(_RWWchildren))
+    CALL log(
+        SFMT("checkNewTasks:_newtasks:%1 sessId:%2 _RWWchildren:%3",
+            _newtasks, sessId, util.JSON.stringify(_RWWchildren)))
     RETURN 0
   END IF
   {
@@ -924,8 +924,8 @@ FUNCTION getSSEIdxFor(v TVMRec INOUT) RETURNS INT
   END IF
   LET len = _s.getLength()
   FOR i = 1 TO len
-    --DISPLAY SFMT("getSSEIdxFor:vmidx:%1,sessId:%2,i:%3,isSSE:%4,sessId:%5,state:%6",
-    --vmidx, sessId, i, _s[i].isSSE, _s[i].sessId, _s[i].state)
+    --DISPLAY SFMT("getSSEIdxFor:vmidx:%1,sessId:%2,i:%3,isSSE:%4,sessId[i]:%5,state:%6",
+    --    v.vmidx, sessId, i, _s[i].isSSE, _s[i].sessId, _s[i].state)
     IF _s[i].state == S_WAITFORVM
         AND _s[i].isSSE
         AND _s[i].active
@@ -2044,6 +2044,7 @@ FUNCTION process_gbc_js(
       '"use strict";\nwindow.addEventListener("unload",function(e) {\nconsole.log("process gbc_fgljp_unload gbc");\ntry { window.gbc_fgljp_unload();\n} catch(err) {\nconsole.warn("process gbc_fgljp_unload error:"+err.msg);\n}\n});\n'
   LET txt = txt, readTextFile(gbc_js)
   --fix GBC-5862
+  --!!t.LayoutTriggerAttributes[u.type][o._tag]
   VAR search="result.needLayout = result.needLayout || Boolean(cls.LayoutTriggerAttributes[cmd.type][toDestroy._tag])"
   VAR toDestroyFix="result.needLayout = result.needLayout || Boolean(toDestroy?(cls.LayoutTriggerAttributes[cmd.type][toDestroy._tag]):false)"
   VAR oldtxt=txt
@@ -2804,6 +2805,17 @@ FUNCTION initVMWithMeta(
   VAR procId = extractMetaVar(line, "procId", TRUE)
   LET procId = extractProcId(procId)
   LET v.procId = procId
+  --happens if fglrun -d restarts a process, new socket but old procId
+  IF _selDict.contains(procId) THEN
+    VAR v_old = _selDict[procId]
+    CALL log(SFMT("!!!!same procId:%1,v_old:%2,vmidx:%3", procId, v_old, vmidx))
+    MYASSERT(_v[v_old].procId == procId)
+    IF v_old <> vmidx THEN
+      --DISPLAY "  handleVMFinish + setEmptyVMConnection v_old"
+      CALL handleVMFinish(_v[v_old])
+      CALL setEmptyVMConnection(v_old)
+    END IF
+  END IF
   LET _selDict[procId] = vmidx --store the selector index of the procId
   LET procIdWaiting = extractMetaVar(line, "procIdWaiting", FALSE)
   IF procIdWaiting IS NOT NULL THEN
@@ -2823,12 +2835,13 @@ FUNCTION checkChildren(vmidx INT, procIdParent STRING)
   DEFINE children TStringArr
   DEFINE ppidx, waitIdx INT
   DEFINE sessId, procIdWaiting, ppid STRING
+  --DISPLAY "checkChildren:", printVIdx(vmidx), ",procIdParent:", procIdParent
   IF NOT _selDict.contains(procIdParent) THEN
     LET ppid = extractPidFromProcId(procIdParent)
     IF ppid == fgl_getpid() THEN
       --DISPLAY "we did invoke this program"
     ELSE
-      DISPLAY "checkChildren vmidx:", vmidx, ",no procIdParent:", procIdParent
+      --DISPLAY "checkChildren vmidx:", vmidx, ",no procIdParent:", procIdParent
       LET _v[vmidx].procIdParentWaiting = procIdParent
     END IF
     RETURN
@@ -2871,14 +2884,24 @@ FUNCTION parentActive(procId STRING)
 END FUNCTION
 }
 
-FUNCTION findAppWithSameFEID(feid STRING)
+FUNCTION findAppWithSameFEID(v TVMRec INOUT) RETURNS BOOLEAN
   DEFINE keys TStringArr
   DEFINE i, vmidx INT
+  --DISPLAY "findAppWithSameFEID:", printV(v)
+  VAR feid = v.frontEndID
+  IF feid IS NULL THEN
+    RETURN FALSE
+  END IF
   MYASSERT(feid IS NOT NULL)
   LET keys = _selDict.getKeys()
   FOR i = 1 TO keys.getLength()
     LET vmidx = _selDict[keys[i]]
     IF feid.equals(_v[vmidx].frontEndID) THEN
+      --take over the useSSE value
+      LET v.useSSE = _v[vmidx].useSSE
+      LET v.sessId = _v[vmidx].sessId
+      CALL log(SFMT("found App With same feid:%1,useSSE:%2,my sessId:%3",
+          printVIdx(vmidx), v.useSSE, v.sessId))
       RETURN TRUE
     END IF
   END FOR
@@ -2913,31 +2936,32 @@ END FUNCTION
 
 FUNCTION decideStartOrNewTask(v TVMRec INOUT, vmidx INT)
   DEFINE pp, procId STRING
-  DEFINE v_old INT
+  --DEFINE v_old INT
   --either start client or send newTask
   LET procId = v.procId
   ---MYASSERT(_selDict.contains(procId))
-  IF _selDict.contains(procId) THEN
-    --happens if fglrun -d restarts a process, new socket but old procId
-    LET v_old = _selDict[procId]
-    --DISPLAY SFMT("same procId:%1,v_old:%2,vmidx:%3", procId, v_old, vmidx)
-    MYASSERT(_v[v_old].procId == procId)
-    IF v.sessId IS NULL THEN
-      LET v.sessId = procId
-    END IF
-    IF v_old <> vmidx THEN
-      CALL handleVMFinish(_v[v_old])
-      CALL setEmptyVMConnection(v_old)
-      LET _selDict[procId] = vmidx
-      --DISPLAY "  handleVMFinish v_old, let _selDict[", procId, "]=", vmidx
-    END IF
+  CALL log(
+      SFMT("decideStartOrNewTask v:%1,vmidx:%2,feId:%3,v.useSSE:%4,v.sessId:%5",
+          printV(v), vmidx, v.frontEndID, v.useSSE, v.sessId))
+  --_selDict[procId] is set in initVMWithMeta
+  MYASSERT(_selDict.contains(procId))
+  VAR haveSameFEID = findAppWithSameFEID(v)
+  IF NOT haveSameFEID AND v.sessId IS NULL THEN
+    LET v.sessId = procId
   END IF
-  IF (pp := v.procIdParent) IS NOT NULL THEN
+
+  IF (pp := v.procIdParent) IS NOT NULL OR (v.useSSE AND haveSameFEID) THEN
     CALL log(
-        SFMT("decideStartOrNewTask:%1 procId:%2 procIdParent:%3 _selDict[pp] idx:%4",
-            vmidx, procId, pp, IIF(_selDict.contains(pp), _selDict[pp], -1)))
+        SFMT("decideStartOrNewTask:%1 procId:%2 procIdParent:%3 _selDict[pp] idx:%4 _numWaitingParent:%5,_opt_program:%6, sessId:%7",
+            vmidx,
+            procId,
+            pp,
+            IIF(_selDict.contains(pp), _selDict[pp], -1),
+            _numWaitingParent,
+            _opt_program,
+            v.sessId))
     CASE
-      WHEN v.useSSE AND _selDict.contains(pp)
+      WHEN v.useSSE AND (_selDict.contains(pp) OR haveSameFEID)
         LET _selDict[procId] = vmidx --store the selector index of the procId
         --DISPLAY "  decideStartOrNewTask1 let _selDict[", procId, "]=", vmidx
         CALL handleVM(v, FALSE, 0)
@@ -2957,7 +2981,7 @@ FUNCTION decideStartOrNewTask(v TVMRec INOUT, vmidx INT)
     IF _opt_program IS NOT NULL
         AND v.frontEndID IS NOT NULL
         AND v.procIdParentWaiting IS NOT NULL
-        AND findAppWithSameFEID(v.frontEndID) THEN
+        AND haveSameFEID THEN
       LET _numWaitingParent = _numWaitingParent + 1
       CALL log(
           SFMT("decideStartOrNewTask incr _numWaitingParent:%1, procIdParentWaiting:%2",
@@ -3111,6 +3135,9 @@ END FUNCTION
 
 FUNCTION handleStart(v TVMRec INOUT)
   DEFINE fake TConn
+  CALL log(
+      SFMT("handleStart v:%1,_direct_mode:%2,_opt_gdc:%3",
+          printV(v), _direct_mode, _opt_gdc))
   --we ask for the GBC version to decide which protocol we choose
   IF _direct_mode THEN
     --request via FT and a -1 httpIdx trick
@@ -3329,7 +3356,7 @@ FUNCTION printRequest(x TConn INOUT, where STRING)
   CALL log(SFMT("%1 %2 '%3'%4 %5", x.method, where, path, swcache, printSel(x)))
 END FUNCTION
 
---main HTPP/VM connection state machine
+--main HTTP/VM connection state machine
 FUNCTION handleLine(c TConn INOUT, line STRING) RETURNS BOOLEAN
   IF fgl_getenv("SHOWALLHTTP") IS NOT NULL THEN
     DISPLAY SFMT("handleLine:%1,line:%2 x:%3",
@@ -3472,7 +3499,7 @@ FUNCTION handleMultiPartUpload(
   --special case: as there is only one file we redirect everything
   --except the end boundary into the tmpfile
   VAR written = util.Channels.copyN(chan, fo, maxToRead - blen)
-  DISPLAY SFMT("did write:%1 to:%2", written, path)
+  --DISPLAY SFMT("did write:%1 to:%2", written, path)
   VAR boundary2 = chan.readOctets(length: blen)
   {
   DISPLAY "boundary2:'", boundary2, "',boundary:'", boundary, "'"
@@ -4470,7 +4497,7 @@ FUNCTION handleFTGetFile(v TVMRec INOUT, num INT, remaining INT) RETURNS INT
   IF remaining > 0 THEN --read extension list
     --LET ext=chan.readBinaryString(remaining)
     LET ext = chan.readOctets(remaining)
-    DISPLAY "ext:", ext
+    --DISPLAY "ext:", ext
     LET remaining = 0
   END IF
   CALL log(
@@ -5696,4 +5723,18 @@ FUNCTION interpretchars(s STRING) RETURNS STRING
     END CASE
   END FOR
   RETURN sb.toString()
+END FUNCTION
+
+FUNCTION currentStr() RETURNS STRING
+  RETURN underscoreDateTime(CURRENT)
+END FUNCTION
+
+FUNCTION underscoreDateTime(dt DATETIME YEAR TO FRACTION(3)) RETURNS STRING
+  DEFINE s STRING
+  LET s = dt
+  LET s = replace(s, "-", "_")
+  LET s = replace(s, " ", "_")
+  LET s = replace(s, ":", "_")
+  LET s = replace(s, ".", "_")
+  RETURN s
 END FUNCTION
