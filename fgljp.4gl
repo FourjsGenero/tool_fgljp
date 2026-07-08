@@ -2199,6 +2199,7 @@ FUNCTION writeToVMWithProcId(
     x TConn INOUT, s STRING, procId STRING)
     RETURNS BOOLEAN
   DEFINE vmidx INT
+  DEFINE hdrs DYNAMIC ARRAY OF STRING
   LET x.idx = x.idx
   IF NOT _selDict.contains(procId) THEN
     CALL log(
@@ -2208,6 +2209,31 @@ FUNCTION writeToVMWithProcId(
   END IF
   CALL log(SFMT("writeToVMWithProcId procId:%1, x:%2", procId, printSel(x)))
   LET vmidx = _selDict[procId]
+  IF _v[vmidx].state == S_FINISH THEN
+    --the VM already finished (its channel is gone) but a trailing client
+    --event arrived on the normal polling channel instead of the dedicated
+    --close URL (gbc0 does this after "rn 0"; real GBC's gbc_fgljp.js wrapper
+    --uses /ua/fgljp_close/ instead, so _selDict is usually cleared by then).
+    --Answer with an empty response instead of dropping x silently: writing
+    --the response sets x.state to S_FINISH, so the generic post-handler
+    --check in handleConnectionInt() finishes/closes x the normal way.
+    --Send X-FourJs-Closed like sendToClient() does for a normal vmclose, so
+    --gbc0.js's getAJAXAnswer() recognizes this as a clean close (kills its
+    --standby/busy overlay) instead of taking its "empty response" branch,
+    --which it treats as a timeout/retry condition and leaves the overlay up.
+    CALL log(
+        SFMT("writeToVMWithProcId: VM already finished for procId:%1, x:%2",
+            procId, printSel(x)))
+    LET hdrs[hdrs.getLength() + 1] = "X-FourJs-Closed: true"
+    CALL writeResponseInt2(x, "", "text/plain", hdrs, "200 OK") RETURNING status
+    --this trailing event is the client's own acknowledgment that the VM
+    --ended (gbc0 sends it instead of calling /ua/fgljp_close/), so treat it
+    --like the real close signal: without this, _selDict keeps the entry,
+    --_checkGoOut never gets set, and fgljp never exits (canGoOut() waits for
+    --_selDict to become empty)
+    CALL selDictRemove(procId)
+    RETURN FALSE
+  END IF
   IF checkPutFileGetFile(x, _v[vmidx], s) THEN
     RETURN FALSE
   END IF
@@ -3163,7 +3189,8 @@ FUNCTION handleGBCVersion(v TVMRec INOUT, gbcVerFile STRING)
   CALL log(SFMT("handleGBCVersion:%1,float:%2", vstr, _gbcver))
   LET _useJSWrapper = _gbcver >= 4.0
   IF _useJSWrapper THEN
-    LET v.useSSE = _gbcver >= 4.0
+    --gbc0 (the JS GBC reimplementation) has no SSE support, unlike real GBC>=4.0
+    LET v.useSSE = (_gbcver >= 4.0) AND NOT isGBC0()
   END IF
   CALL handleStart2(v)
 END FUNCTION
@@ -4011,6 +4038,10 @@ END FUNCTION
 
 FUNCTION warning(s STRING)
   DISPLAY "!!!!!!!!WARNING:", s
+END FUNCTION
+
+FUNCTION isGBC0() RETURNS BOOLEAN
+  RETURN os.Path.exists(os.Path.join(_gbcdir, "gbc0.js"))
 END FUNCTION
 
 PRIVATE FUNCTION _findGBCIn(dirname)
