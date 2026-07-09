@@ -22,6 +22,23 @@ FUNCTION checkRUN(cmd STRING)
   END IF
 END FUNCTION
 
+#+ like checkRUN(), but checks for a specific exit code instead of just
+#+ "zero means success" (used to check that fgljp gives back the exit code
+#+ of the program it launched, not just whether it failed).
+#+ On UNIX, RETURNING gives back the raw wait() status (exit code * 256 +
+#+ signal), not the plain exit code - decode it the same way the RUN
+#+ instruction's own doc example (runBatch()) does.
+FUNCTION checkRUNExitCode(cmd STRING, expected INT)
+  DEFINE code INT
+  RUN cmd RETURNING code
+  IF NOT isWin() THEN
+    LET code = code / 256
+  END IF
+  IF code <> expected THEN
+    CALL myErr(SFMT("RUN '%1' returned %2, expected %3", cmd, code, expected))
+  END IF
+END FUNCTION
+
 FUNCTION myErr(errstr STRING)
   DEFINE ch base.Channel
   DEFINE cmd STRING

@@ -219,6 +219,7 @@ DEFINE _owndir STRING
 DEFINE _privdir STRING
 DEFINE _pubdir STRING
 DEFINE _progdir STRING
+DEFINE _exitCodeMarkerFile STRING --set by setup_program(), read back at exit
 DEFINE _htpre STRING
 DEFINE _port INT
 DEFINE _server base.Channel
@@ -249,6 +250,10 @@ MAIN
   DEFINE port, idx INT
   DEFINE htpre STRING
   DEFINE priv, pub STRING
+  DEFINE exitCodeTxt TEXT
+  DEFINE exitCodeStr STRING
+  DEFINE exitCode INT
+  DEFINE exitCodeDeadline DATETIME YEAR TO FRACTION(3)
   LET _starttime = CURRENT
   IF fgl_getenv("VERBOSE") IS NOT NULL THEN
     LET _verbose = TRUE
@@ -314,6 +319,29 @@ MAIN
           util.JSON.stringify(_v),
           util.JSON.stringify(_selDict),
           util.JSON.stringify(_RWWchildren)))
+  --the launched program's shell wrapper script (see setup_program()) drops
+  --this marker only when its own exit code was non-zero, so we can give
+  --that same code back to whoever started fgljp instead of always exiting
+  --0. The wrapper runs detached (RUN ... WITHOUT WAITING) and races our own
+  --shutdown here, so give it a brief window to finish writing it - this
+  --only delays exit in the direct-mode/program-argument case, and only for
+  --a few ms in practice.
+  IF _exitCodeMarkerFile IS NOT NULL THEN
+    LET exitCodeDeadline = CURRENT YEAR TO FRACTION(3) + 1 UNITS SECOND
+    WHILE NOT os.Path.exists(_exitCodeMarkerFile)
+        AND CURRENT YEAR TO FRACTION(3) < exitCodeDeadline
+      LET idx = idx --no-op: busy-wait, the wait is only ever a few ms
+    END WHILE
+    IF os.Path.exists(_exitCodeMarkerFile) THEN
+      LOCATE exitCodeTxt IN FILE _exitCodeMarkerFile
+      LET exitCodeStr = exitCodeTxt
+      CALL os.Path.delete(_exitCodeMarkerFile) RETURNING status
+      LET exitCodeStr = trimWhiteSpace(exitCodeStr)
+      LET exitCode = parseInt(exitCodeStr)
+      CALL log(SFMT("fgljp exiting with program's error code:%1", exitCode))
+      EXIT PROGRAM exitCode
+    END IF
+  END IF
 END MAIN
 
 FUNCTION dataAvailableIndex() RETURNS INT
@@ -424,6 +452,8 @@ END FUNCTION
 FUNCTION setup_program(program1 STRING, priv STRING, pub STRING)
   DEFINE s, arg1, cmd, fglrun STRING
   DEFINE code INT
+  DEFINE scriptFile, scriptLine STRING
+  DEFINE scriptCh base.Channel
   VAR progdir = os.Path.fullPath(os.Path.dirName(program1))
   LET _progdir = progdir
   LET _pubdir = os.Path.join(progdir, "pub")
@@ -452,8 +482,54 @@ FUNCTION setup_program(program1 STRING, priv STRING, pub STRING)
   LET fglrun = IIF(code, "", "fglrun ")
   LET _run_cnt = _run_cnt + 1
   VAR feid = SFMT("FEID%1_%2", currentStr(), _run_cnt)
-  VAR fenv = SFMT("%1 _FGLFEID=%2", IIF(isWin(), "set", "export"), feid)
-  LET s = SFMT("%1&&%2%3", fenv, fglrun, _opt_program)
+  LET _exitCodeMarkerFile = makeTempName()
+  --capture fglrun's exit code and, if non-zero, drop it in a marker file for
+  --us to read back once the main loop ends (see end of MAIN). RUN WITHOUT
+  --WAITING can't give us the child's return code directly, and a literal
+  --shell "$?"/exit-status reference inside a RUN command string gets
+  --silently stripped before the OS shell ever sees it (RUN appears to do
+  --its own "$"-prefixed substitution on the command string) - so write a
+  --small wrapper script file instead and just run that.
+  LET scriptCh = base.Channel.create()
+  IF isWin() THEN
+    LET scriptFile = _exitCodeMarkerFile, ".bat"
+    CALL scriptCh.openFile(scriptFile, "w")
+    LET scriptLine = "set _FGLFEID=", feid
+    CALL scriptCh.writeLine(scriptLine)
+    LET scriptLine = fglrun, _opt_program
+    CALL scriptCh.writeLine(scriptLine)
+    --write-then-rename: os.Path.exists()/reading the marker file on the
+    --fgljp side could otherwise race the ">" redirection, which creates
+    --(truncates) the file before its content is actually written
+    LET scriptLine =
+        'if not "%errorlevel%"=="0" (echo %errorlevel%>', _exitCodeMarkerFile,
+        ".new & move /y ", _exitCodeMarkerFile, ".new ", _exitCodeMarkerFile,
+        ")"
+    CALL scriptCh.writeLine(scriptLine)
+    LET scriptLine = "del ", quote(scriptFile)
+    CALL scriptCh.writeLine(scriptLine)
+    CALL scriptCh.close()
+    LET s = quote(scriptFile)
+  ELSE
+    LET scriptFile = _exitCodeMarkerFile, ".sh"
+    CALL scriptCh.openFile(scriptFile, "w")
+    LET scriptLine = "export _FGLFEID=", feid
+    CALL scriptCh.writeLine(scriptLine)
+    LET scriptLine = fglrun, _opt_program
+    CALL scriptCh.writeLine(scriptLine)
+    CALL scriptCh.writeLine("code=$?")
+    --write-then-rename: os.Path.exists()/reading the marker file on the
+    --fgljp side could otherwise race the ">" redirection, which creates
+    --(truncates) the file before its content is actually written
+    LET scriptLine =
+        "if [ $code -ne 0 ]; then echo $code > ", quote(_exitCodeMarkerFile),
+        ".new && mv ", quote(_exitCodeMarkerFile), ".new ",
+        quote(_exitCodeMarkerFile), "; fi"
+    CALL scriptCh.writeLine(scriptLine)
+    CALL scriptCh.writeLine(SFMT("rm -f %1", quote(scriptFile)))
+    CALL scriptCh.close()
+    LET s = "sh ", quote(scriptFile)
+  END IF
   CALL log(SFMT("setup_program RUN:'%1' WITHOUT WAITING", s))
   RUN s WITHOUT WAITING
 END FUNCTION

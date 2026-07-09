@@ -6,6 +6,9 @@ MAIN
   LET fgljp="..",os.Path.separator(),"fgljp"
   --test GAS mode
   CALL testutils.checkRUN(fgljp || " test")
+  --test fgljp gives back the exit code of the program it launched
+  CALL testutils.checkRUNExitCode(fgljp || " exitcode fail", 3)
+  CALL testutils.checkRUNExitCode(fgljp || " exitcode ok", 0)
   --test remote mode
   CALL os.Path.delete("test.start") RETURNING status 
   RUN fgljp ||" -v -l test.log -o test.start -X" WITHOUT WAITING
