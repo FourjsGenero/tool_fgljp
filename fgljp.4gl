@@ -425,6 +425,7 @@ FUNCTION setup_program(program1 STRING, priv STRING, pub STRING)
   DEFINE s, arg1, cmd, fglrun STRING
   DEFINE code INT
   VAR progdir = os.Path.fullPath(os.Path.dirName(program1))
+  LET _progdir = progdir
   LET _pubdir = os.Path.join(progdir, "pub")
   --LET _privdir = os.Path.join(progdir, "priv")
   LET _privdir = os.Path.makeTempName(), "_priv"
