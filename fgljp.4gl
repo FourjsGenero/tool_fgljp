@@ -293,7 +293,7 @@ MAIN
   LET _htpre = htpre
   LET priv = htpre, "priv/"
   LET pub = htpre
-  LET _owndir = os.Path.fullPath(os.Path.dirName(arg_val(0)))
+  CALL setOwnDir(os.Path.dirName(arg_val(0)))
   IF _opt_program IS NOT NULL THEN
     CALL checkGBCAvailable()
     CALL setup_program(_opt_program1, priv, pub)
@@ -2064,6 +2064,14 @@ FUNCTION inject_gbc_fgljp(b base.StringBuffer)
   LET d["t"] = getLastModified(gbc_fgljp)
   CALL b.append(
       SFMT('<script src="%1"></script>\n', formatUrl("gbc_fgljp.js", d)))
+END FUNCTION
+
+--sets the directory fgljp serves its own assets (gbc_fgljp.js, getgdcpath,
+--fglprofile) from: normally the directory of fgljp.42m itself. Public so a
+--test importing this module can point it at its own fixture directory
+--instead of going through MAIN.
+PUBLIC FUNCTION setOwnDir(dir STRING)
+  LET _owndir = os.Path.fullPath(dir)
 END FUNCTION
 
 --injects our js wrapper into the gbc index.html page
