@@ -729,6 +729,7 @@ console.log("gbc_fgljp begin");
       patchWrapResourcePath(classes); //workaround GBC-3240,GBC-3105
     }
     patchSendUpload(classes);
+    patchEmbeddedFocusEtiquette(classes);
     if (_isGBC4 && !haveDebuggerFCs) {
       patchNavMan(classes); //add some helpers
     }
@@ -770,6 +771,43 @@ console.log("gbc_fgljp begin");
       request.upload.addEventListener("progress", progressHandler.bind(this));
       request.send(thefile);
     }
+  }
+
+  //GBC-5995: embedded etiquette hot patch.
+  //GBC's restoreVMFocus() does a DOM focus() after every VM round trip
+  //without checking document.hasFocus(): running embedded in an iframe
+  //(IDE webview, portal page) it steals the keyboard focus from the host
+  //page - with ON IDLE polling once per second. Until a fixed GBC ships
+  //(and for customized GBCs which can't rebase immediately) we defer the
+  //whole restore while the document doesn't own the keyboard and re-arm
+  //it once our window gets focused again.
+  function patchEmbeddedFocusEtiquette(classes) {
+    var FocusService = classes.FocusApplicationService;
+    if (!FocusService || !FocusService.prototype.restoreVMFocus) {
+      console.warn("patchEmbeddedFocusEtiquette: no FocusApplicationService.restoreVMFocus, skipped");
+      return;
+    }
+    var orig = FocusService.prototype.restoreVMFocus;
+    FocusService.prototype.restoreVMFocus = function() {
+      if (document.hasFocus()) {
+        return orig.apply(this, arguments);
+      }
+      mylog("restoreVMFocus deferred: document has no focus (GBC-5995)");
+      if (!this._fgljpFocusRearm) {
+        var self = this;
+        self._fgljpFocusRearm = function() {
+          window.removeEventListener("focus", self._fgljpFocusRearm);
+          self._fgljpFocusRearm = null;
+          var app = self._application;
+          if (app && !app.isDestroyed() && app.scheduler &&
+              app.scheduler.restoreFocusCommand) {
+            app.scheduler.restoreFocusCommand();
+          }
+        };
+        window.addEventListener("focus", self._fgljpFocusRearm);
+      }
+    };
+    mylog("patchEmbeddedFocusEtiquette: active (GBC-5995 hot patch)");
   }
 
   function patchFCURForced(gbc) {
