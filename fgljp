@@ -6,7 +6,6 @@ realpath() {
 SCRIPT_NAME=`realpath $0`
 FGLJPDIR=`dirname $SCRIPT_NAME` 
 #echo "FGLJPDIR=$FGLJPDIR"
-export FGL_LENGTH_SEMANTICS=BYTE
 export LC_ALL="en_US.UTF-8"
 pushd "`pwd`" >/dev/null
 cd "$FGLJPDIR"

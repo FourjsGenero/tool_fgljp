@@ -9,7 +9,6 @@ pushd %CD%
 %THISDRIVE%
 cd %FGLJPDIR%
 rem compile mygetopt first as it is used b fgljp
-set FGL_LENGTH_SEMANTICS=BYTE
 set LANG=.fglutf8
 set FGLGUI=0
 CALL myfglcomp mygetopt

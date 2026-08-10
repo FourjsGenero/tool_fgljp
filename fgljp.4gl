@@ -25,7 +25,7 @@ PUBLIC TYPE TStartEntries RECORD
 END RECORD
 
 TYPE TStringDict DICTIONARY OF STRING
-TYPE TStringArr DYNAMIC ARRAY OF STRING
+PUBLIC TYPE TStringArr DYNAMIC ARRAY OF STRING
 
 CONSTANT S_INIT = "Init"
 CONSTANT S_HEADERS = "Headers"
@@ -48,7 +48,7 @@ CONSTANT CLOSED = TRUE
 
 PUBLIC TYPE F_customHeaderFunc FUNCTION(hdrs DYNAMIC ARRAY OF STRING)
 
-TYPE FTGetImage RECORD
+PUBLIC TYPE FTGetImage RECORD
   name STRING,
   num INT,
   cache BOOLEAN,
@@ -59,7 +59,7 @@ TYPE FTGetImage RECORD
   httpIdx INT
 END RECORD
 
-TYPE FTList DYNAMIC ARRAY OF FTGetImage
+PUBLIC TYPE FTList DYNAMIC ARRAY OF FTGetImage
 
 --record holding the state of an initial
 --or HTTP connection
@@ -96,7 +96,7 @@ TYPE TConn RECORD
 END RECORD
 
 --record holding the state of a VM connection
-TYPE TVMRec RECORD
+PUBLIC TYPE TVMRec RECORD
   id INT,
   active BOOLEAN,
   chan base.Channel,
@@ -236,6 +236,8 @@ DEFINE _run_cnt INT
 TYPE TclP RECORD
   pos INT,
   buf STRING,
+  chars DYNAMIC ARRAY OF STRING, --buf split into characters, see tclSetBuf()
+  len INT, --character count of buf
   number INT,
   value STRING,
   valueStart INT,
@@ -2706,7 +2708,7 @@ FUNCTION writeResponseInt2(
   IF content IS NULL THEN
     LET content = " " CLIPPED
   END IF
-  LET content_length = content.getLength() -- need content.getByteLength()
+  LET content_length = content.getMultibyteLength() --byte count, CHAR semantics safe
   IF NOT writeHTTPHeaders(x, headers) THEN
     RETURN FALSE
   END IF
@@ -4051,29 +4053,17 @@ END FUNCTION
 
 FUNCTION quoteVMStr(s STRING)
   DEFINE sb base.StringBuffer
-  DEFINE len, i INT
-  DEFINE c STRING
+  --pattern replaces instead of a getCharAt(i) loop: getCharAt walks byte
+  --positions with BYTE length semantics (mangles non ASCII) and is O(n^2)
+  --with CHAR semantics (DOC-6487); backslash doubling must come first
   LET sb = base.StringBuffer.create()
-  LET len = s.getLength()
-  FOR i = 1 TO len
-    LET c = s.getCharAt(i)
-    CASE c
-      WHEN '\\'
-        CALL sb.append('\\\\')
-      WHEN '\n'
-        CALL sb.append('\\n')
-      WHEN '"'
-        CALL sb.append('\\"')
-      WHEN '$'
-        CALL sb.append('\\$')
-      WHEN '{'
-        CALL sb.append('\\{')
-      WHEN '}'
-        CALL sb.append('\\}')
-      OTHERWISE
-        CALL sb.append(c)
-    END CASE
-  END FOR
+  CALL sb.append(s)
+  CALL sb.replace('\\', '\\\\', 0)
+  CALL sb.replace('\n', '\\n', 0)
+  CALL sb.replace('"', '\\"', 0)
+  CALL sb.replace('$', '\\$', 0)
+  CALL sb.replace('{', '\\{', 0)
+  CALL sb.replace('}', '\\}', 0)
   RETURN sb.toString()
 END FUNCTION
 
@@ -5138,11 +5128,13 @@ FUNCTION sendGetImageOrAck(
   CALL log(
       SFMT("sendGetImageOrAck num:%1,fileName:'%2',getImage:%3",
           num, fileName, getImage))
-  LET len = fileName.getLength()
+  --wire lengths are byte counts: getMultibyteLength() is length semantics
+  --independent, getLength() counts characters under FGL_LENGTH_SEMANTICS=CHAR
+  LET len = fileName.getMultibyteLength()
   LET pktlen = 1 + 2 * size_i + len; --1st byte FT instruction
   IF getImage THEN --append imagelist
     LET ext = ".png;.PNG;.gif;.GIF;.jpg;.JPG;.tif;.TIF;.bmp;.BMP"
-    LET extlen = ext.getLength()
+    LET extlen = ext.getMultibyteLength()
     LET pktlen = pktlen + size_i + extlen + 1;
   END IF
   LET b0 = IIF(getImage, FTGetFile, FTAck)
@@ -5222,7 +5214,9 @@ FUNCTION writeToVMEncaps(v TVMRec INOUT, cmd STRING)
       LET type = TAuiData
   END CASE
   CALL log(SFMT("writeToVMEncaps vm:%1,cmd:%2", printV(v), limitPrintStr(cmd)))
-  CALL writeEncapsHeader(chan, type, cmd.getLength())
+  --byte count: writeBinaryString writes all bytes, getLength() would
+  --truncate the frame under FGL_LENGTH_SEMANTICS=CHAR with non-ASCII data
+  CALL writeEncapsHeader(chan, type, cmd.getMultibyteLength())
   CALL util.Channels.writeBinaryString(chan, cmd)
   CALL chan.flush()
 END FUNCTION
@@ -5249,18 +5243,43 @@ FUNCTION rmrf(dirname STRING)
   RUN cmd
 END FUNCTION
 
+--DOC-6487: STRING.split(NULL) yields every character of the string (plus an
+--empty first and last element to drop) and is character exact under BOTH
+--length semantics -- unlike getCharAt(i), which walks byte positions with
+--BYTE semantics (continuation bytes come back as ' ') and is O(n^2) with
+--CHAR semantics.
+FUNCTION string_to_char_array(s STRING) RETURNS DYNAMIC ARRAY OF STRING
+  DEFINE arr DYNAMIC ARRAY OF STRING
+  LET arr = s.split(NULL)
+  CALL arr.deleteElement(arr.getLength())
+  CALL arr.deleteElement(1)
+  RETURN arr
+END FUNCTION
+
+--set the scanner buffer: the scanner iterates over the character array,
+--_p.pos and _p.len are character positions/counts
+FUNCTION tclSetBuf(s STRING)
+  LET _p.buf = s
+  LET _p.chars = string_to_char_array(s)
+  LET _p.len = _p.chars.getLength()
+END FUNCTION
+
+FUNCTION tclCharAt(pos INT) RETURNS STRING
+  IF pos < 1 OR pos > _p.len THEN
+    RETURN NULL --like STRING.getCharAt() out of range
+  END IF
+  RETURN _p.chars[pos]
+END FUNCTION
+
 FUNCTION eatWS() RETURNS STRING
-  DEFINE buf, u STRING
-  DEFINE len INT
-  LET buf = _p.buf
-  LET len = buf.getLength();
-  IF (_p.pos >= len) THEN
+  DEFINE u STRING
+  IF (_p.pos >= _p.len) THEN
     RETURN -1;
   END IF
-  LET u = buf.getCharAt(_p.pos);
-  WHILE _p.pos <= len AND (u == ' ' OR u == '\n' OR u == '\\')
+  LET u = tclCharAt(_p.pos);
+  WHILE _p.pos <= _p.len AND (u == ' ' OR u == '\n' OR u == '\\')
     LET _p.pos = _p.pos + 1;
-    LET u = buf.getCharAt(_p.pos);
+    LET u = tclCharAt(_p.pos);
   END WHILE
   RETURN u
 END FUNCTION
@@ -5273,46 +5292,38 @@ FUNCTION getChar() RETURNS STRING
 END FUNCTION
 
 FUNCTION identFromBuf()
-  DEFINE buf, u, prev STRING
-  DEFINE i, len INT
+  DEFINE u, prev STRING
+  DEFINE i INT
   DEFINE b base.StringBuffer
   LET b = base.StringBuffer.create()
-  LET buf = _p.buf;
-  LET u = buf.getCharAt(_p.pos);
+  LET u = tclCharAt(_p.pos);
   LET prev = u
   LET i = 0;
-  LET len = buf.getLength();
-  WHILE (_p.pos <= len
+  WHILE (_p.pos <= _p.len
       AND NOT (u.equals(' ') || u.equals('{') || u.equals('}')))
     LET _p.pos = _p.pos + 1
-    LET u = buf.getCharAt(_p.pos);
+    LET u = tclCharAt(_p.pos);
     CALL b.append(prev)
     LET prev = u
     LET i = i + 1;
   END WHILE
   --//copy ident portion to ident
-  --LET _p.ident = buf.subString(_p.pos - i, _p.pos - 1);
   LET _p.ident = b.toString()
-  --DISPLAY "_p.ident:'",_p.ident
-  --DISPLAY "b       :'",b.toString()
 END FUNCTION
 
 FUNCTION getValueWithSeparator(separator STRING)
   DEFINE valueBuf base.StringBuffer
-  DEFINE buf, u STRING
-  DEFINE len INT
+  DEFINE u STRING
   LET valueBuf = base.StringBuffer.create()
   LET _p.pos = _p.pos + 1 --// remove first "
   LET _p.valueStart = _p.pos
-  LET buf = _p.buf;
-  LET len = buf.getLength();
-  WHILE (_p.pos <= len)
-    LET u = buf.getCharAt(_p.pos);
+  WHILE (_p.pos <= _p.len)
+    LET u = tclCharAt(_p.pos);
     --DISPLAY "getValueWithSeparator1:", u
     CASE
       WHEN u == '\\'
         LET _p.pos = _p.pos + 1
-        LET u = buf.getCharAt(_p.pos);
+        LET u = tclCharAt(_p.pos);
         --DISPLAY "getValueWithSeparator2:", u
         CALL valueBuf.append(IIF(u == 'n', '\n', u))
       WHEN u == separator
@@ -5337,7 +5348,7 @@ FUNCTION getToken()
   WHILE (testnum := u) IS NOT NULL --// isdigit
     LET numbuf = numbuf, u;
     LET _p.pos = _p.pos + 1
-    LET u = _p.buf.getCharAt(_p.pos);
+    LET u = tclCharAt(_p.pos);
     --DISPLAY "getToken:'", u, "',numbuf:'", numbuf, "'"
   END WHILE
 
@@ -5374,10 +5385,10 @@ FUNCTION parseTclInt(v TVMRec INOUT, s STRING)
   MYASSERT(_p.active == FALSE)
   LET _p.active = TRUE
   LET _p.pos = 1
-  LET _p.buf = s
+  CALL tclSetBuf(s)
   LET _p.number = NULL
   LET result = TRUE
-  WHILE (result AND _p.pos <= s.getLength())
+  WHILE (result AND _p.pos <= _p.len)
     MYASSERT(getToken() == TOK_Ident)
     CASE
       WHEN _p.ident == "meta"
@@ -5413,14 +5424,24 @@ END FUNCTION
 
 FUNCTION removePendingFT(v TVMRec INOUT)
   DEFINE rn STRING
-  --we insert the remove node cmd for the pending file transfer
+  DEFINE b base.StringBuffer
+  DEFINE i INT
+  --we insert the remove node cmd for the pending file transfer;
+  --spliced via the character array: subString positions are byte based
+  --with BYTE length semantics and would not match the character positions
+  --of the scanner
   LET rn = SFMT("{rn %1} ", v.rnFTNodeId)
   LET v.rnFTNodeId = 0
-  LET _p.buf =
-      _p.buf.subString(1, _p.pos - 1),
-      rn,
-      _p.buf.subString(_p.pos, _p.buf.getLength())
-  LET _p.pos = _p.pos + rn.getLength()
+  LET b = base.StringBuffer.create()
+  FOR i = 1 TO _p.pos - 1
+    CALL b.append(_p.chars[i])
+  END FOR
+  CALL b.append(rn)
+  FOR i = _p.pos TO _p.len
+    CALL b.append(_p.chars[i])
+  END FOR
+  CALL tclSetBuf(b.toString())
+  LET _p.pos = _p.pos + rn.getLength() --rn is pure ASCII
   CALL log(SFMT("removePendingFT: %1", limitPrintStr(_p.buf)))
 END FUNCTION
 
@@ -5812,15 +5833,16 @@ END FUNCTION
 
 FUNCTION interpretchars(s STRING) RETURNS STRING
   DEFINE c, hex STRING
-  DEFINE i, len INT
+  DEFINE i INT
+  DEFINE chars DYNAMIC ARRAY OF STRING
   DEFINE sb base.StringBuffer
   CONSTANT ascji =
       "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890!@#$%^&*()-=_+~`{}[] |:;\"'<>,.?/\\"
   --CONSTANT  "\"\\"
-  LET len = s.getLength()
+  LET chars = string_to_char_array(s) --DOC-6487: character exact, O(n)
   LET sb = base.StringBuffer.create()
-  FOR i = 1 TO len
-    LET c = s.getCharAt(i)
+  FOR i = 1 TO chars.getLength()
+    LET c = chars[i]
     CASE
       WHEN ascji.getIndexOf(c, 1) > 0
         CALL sb.append(c)
