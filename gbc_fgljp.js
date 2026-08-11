@@ -907,6 +907,29 @@ console.log("gbc_fgljp begin");
     fgljp.getSessId=getSessId;
   }
   window.gbc.ThemeService.setValue("theme-sidebar-max-width","100000px");
+  //fgljp --hide-chromebar: an embedder (an IDE preview panel, say) wants the
+  //vertical space and has its own frame around us.
+  //
+  //gbc-ChromeBar-show is the switch GBC reads when a session starts, but by
+  //the time this script runs the bar can already be there, so it is also
+  //removed through MainContainerService as soon as it shows up. That is GBC's
+  //own call: it takes the bar out and reports isChromeBarVisible() false, so
+  //whatever GBC routes to the chrome goes elsewhere instead of into something
+  //merely made invisible with CSS.
+  if (/[?&]hidechromebar=1(&|$)/.test(window.location.search)) {
+    window.gbc.ThemeService.setValue("gbc-ChromeBar-show", false);
+    var _cbTries = 0;
+    var _cbTimer = setInterval(function() {
+      var mcs = window.gbc.MainContainerService;
+      if (mcs && mcs.isChromeBarVisible()) {
+        mcs.hideChromeBar();
+        mylog("chrome bar hidden (fgljp --hide-chromebar)");
+        clearInterval(_cbTimer);
+      } else if (++_cbTries > 60) { //~3s, the bar never appeared
+        clearInterval(_cbTimer);
+      }
+    }, 50);
+  }
   var ver=window.gbc.version;
   _isGBC4= parseFloat(ver)>=4.0;
   _isGBC5= parseFloat(ver)>=5.0;

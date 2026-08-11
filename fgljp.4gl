@@ -189,6 +189,7 @@ DEFINE _stdoutNONL STRING
 DEFINE _opt_port STRING
 DEFINE _opt_startfile STRING
 DEFINE _opt_logfile STRING
+DEFINE _opt_hide_chromebar BOOLEAN
 DEFINE _opt_autoclose BOOLEAN
 DEFINE _opt_any BOOLEAN
 DEFINE _opt_gdc BOOLEAN
@@ -645,6 +646,13 @@ PRIVATE FUNCTION parseArgs()
   LET o[i].arg_type = mygetopt.NONE
 
   LET i = o.getLength() + 1
+  LET o[i].name = "hide-chromebar"
+  LET o[i].description =
+      "tell GBC not to show its chrome bar (for embedders needing the space)"
+  LET o[i].opt_char = NULL
+  LET o[i].arg_type = mygetopt.NONE
+
+  LET i = o.getLength() + 1
   LET o[i].name = "listen-any"
   LET o[i].description = "fgljp is reachable from outside"
   LET o[i].opt_char = "a"
@@ -681,6 +689,15 @@ PRIVATE FUNCTION parseArgs()
         LET _opt_autoclose = TRUE
       WHEN 'a'
         LET _opt_any = TRUE
+      OTHERWISE
+        --long-only options have no opt_char: mygetopt reports which entry of
+        --our own option array matched
+        IF mygetopt.opt_char(gr) IS NULL THEN
+          CASE o[mygetopt.option_index(gr)].name
+            WHEN "hide-chromebar"
+              LET _opt_hide_chromebar = TRUE
+          END CASE
+        END IF
     END CASE
   END WHILE
   IF (cnt := mygetopt.getMoreArgumentCount(gr)) >= 1 THEN
@@ -3294,16 +3311,25 @@ FUNCTION handleStart2(v TVMRec INOUT)
       LET platfType=IIF(_gbcver >= 5.0,"browser","native")
       LET startPath = startPath, "&UR_PLATFORM_TYPE=",platfType
       --since GBC5 the chrome isn't shown for GDC so we masquerade as GWA
-      LET platfName=IIF(_gbcver >= 5.0,"GWA","GDC")
+      --LET platfName=IIF(_gbcver >= 5.0,"GWA","GDC")
+      LET platfName="GDC"
       LET startPath = startPath, "&UR_PLATFORM_NAME=",platfName
       LET startPath = startPath, "&UR_PROTOCOL_TYPE=direct"
+      --gbc_fgljp.js turns this into ThemeService gbc-ChromeBar-show=false,
+      --which makes GBC drop the chrome bar the way it means to (the bar is
+      --removed and isChromeBarVisible() becomes false). Announcing a native
+      --platform hides it too, but activates GBC's debug service, which then
+      --swallows ctrl+click - the secondary click of a Mac trackpad.
+      IF _opt_hide_chromebar THEN
+        LET startPath = startPath, "&hidechromebar=1"
+      END IF
       IF _gbcver >= 4.0 THEN
         LET startPath = startPath, "&UR_PROTOCOL_VERSION=2"
       END IF
       IF _verbose THEN
         LET startPath = startPath, "&verbose=1"
       END IF
-      LET startPath = startPath, "&debugmode=1"
+      --LET startPath = startPath, "&debugmode=1"
     END IF
     IF _firstPath IS NULL THEN
       LET _firstPath = "/", startPath
