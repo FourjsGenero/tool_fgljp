@@ -50,3 +50,18 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+# compiled Genero modules/forms (42m, 42f, ...)
+*.42?
+
+# editor backups
+*.4gl~
+
+# test artifacts (see test/Makefile clean target)
+*.log
+test/test.start
+test/logo\?.png
+test/tt
+test/cacheFT/
+test/priv/
+test/FT/
