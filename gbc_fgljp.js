@@ -407,8 +407,21 @@ console.log("gbc_fgljp begin");
     var withId = el && el.closest ? el.closest("[data-aui-id]") : null;
     return withId ? parseInt(withId.dataset.auiId, 10) : null;
   }
+  //only what belongs to the form itself is picked: everything around it -
+  //the context menu above all, whose entries are chosen with an ordinary
+  //click - has to keep working as it does
+  function formEditInForm(node) {
+    return Boolean(node) &&
+      (node.getTag() === "Form" || Boolean(node.getAncestor("Form")));
+  }
   function formEditMouse(event) {
     if (!_formEditOn || event.button !== 0 || event.ctrlKey) {
+      return;
+    }
+    var tag = formEditWidgetTag(event.target);
+    var app = getCurrentApp();
+    var node = tag && app ? getNode(tag, app) : null;
+    if (!formEditInForm(node)) {
       return;
     }
     //the form is being looked at, not used: no click gets through to it
@@ -417,16 +430,9 @@ console.log("gbc_fgljp begin");
     if (event.type !== "click") {
       return;
     }
-    var tag = formEditWidgetTag(event.target);
-    if (!tag) {
-      return;
-    }
     _formEditClicked = tag;
-    var app = getCurrentApp();
     formEditMarkNow(tag, app);
-    if (app) {
-      app.scheduler.actionVMCommand(null, { actionName: FORMEDIT_ACTION });
-    }
+    app.scheduler.actionVMCommand(null, { actionName: FORMEDIT_ACTION });
   }
   //marks the clicked element and arms the way back, see FORMEDIT_CONFIRM_MS
   function formEditMarkNow(tag, app) {
