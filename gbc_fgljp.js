@@ -424,12 +424,9 @@ console.log("gbc_fgljp begin");
     if (!formEditInForm(node)) {
       return;
     }
-    //the form is being looked at, not used: no click gets through to it
+    //the form is being looked at, not used: the click does not reach it
     event.preventDefault();
     event.stopPropagation();
-    if (event.type !== "click") {
-      return;
-    }
     _formEditClicked = tag;
     formEditMarkNow(tag, app);
     app.scheduler.actionVMCommand(null, { actionName: FORMEDIT_ACTION });
@@ -463,14 +460,17 @@ console.log("gbc_fgljp begin");
       _formEditRevert = null;
     }
   }
+  //Only the click is taken, never the mouse press: the browser makes the
+  //contextmenu event the default action of the press, so preventing that
+  //press is what stops a two finger tap from opening the context menu -
+  //ctrl+click survived it only because this leaves ctrl alone. Taking the
+  //click is enough to keep it away from the form: GBC hangs its own mouse
+  //handling on document.body, below where this listens.
   function formEditListen(on) {
-    var types = ["mousedown", "mouseup", "click"];
-    for (var i = 0; i < types.length; i++) {
-      if (on) {
-        document.addEventListener(types[i], formEditMouse, true);
-      } else {
-        document.removeEventListener(types[i], formEditMouse, true);
-      }
+    if (on) {
+      document.addEventListener("click", formEditMouse, true);
+    } else {
+      document.removeEventListener("click", formEditMouse, true);
     }
   }
   function addFormEditFrontCalls(gbc) {
