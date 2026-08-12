@@ -377,8 +377,80 @@ console.log("gbc_fgljp begin");
     }
     _formEditMarked = [];
   }
+  //The other direction of the form editor contract: while edit mode is on, a
+  //click picks the element instead of using the form, and the program is told
+  //with the "formeditclick" action - a program that does not declare it is
+  //not disturbed by it. It then asks getclickednode() what was hit, which is
+  //how an editor can put its cursor on the source of the element clicked.
+  //Secondary clicks are left alone: they open the context menu.
+  var _formEditOn = false;
+  var _formEditClicked = -1;
+  var FORMEDIT_ACTION = "formeditclick";
+  function formEditWidgetTag(el) {
+    var widget = window.gbc.WidgetService.getWidgetFromElement(el);
+    if (widget && widget.getAUIWidget && widget.getAUIWidget()) {
+      widget = widget.getAUIWidget();
+    }
+    var tag = widget && widget.getAuiTag ? widget.getAuiTag() : null;
+    if (tag) {
+      return tag;
+    }
+    //every widget element carries its aui id, so this still works when the
+    //element belongs to no widget of its own
+    var withId = el && el.closest ? el.closest("[data-aui-id]") : null;
+    return withId ? parseInt(withId.dataset.auiId, 10) : null;
+  }
+  function formEditMouse(event) {
+    if (!_formEditOn || event.button !== 0 || event.ctrlKey) {
+      return;
+    }
+    //the form is being looked at, not used: no click gets through to it
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.type !== "click") {
+      return;
+    }
+    var tag = formEditWidgetTag(event.target);
+    if (!tag) {
+      return;
+    }
+    _formEditClicked = tag;
+    var app = getCurrentApp();
+    if (app) {
+      app.scheduler.actionVMCommand(null, { actionName: FORMEDIT_ACTION });
+    }
+  }
+  function formEditListen(on) {
+    var types = ["mousedown", "mouseup", "click"];
+    for (var i = 0; i < types.length; i++) {
+      if (on) {
+        document.addEventListener(types[i], formEditMouse, true);
+      } else {
+        document.removeEventListener(types[i], formEditMouse, true);
+      }
+    }
+  }
   function addFormEditFrontCalls(gbc) {
     gbc.FrontCallService.modules.formedit = {
+      //edit(<window node id>, 0|1): same call as the GDC one, the window is
+      //not needed here - the click is resolved to whatever element it hit
+      edit: function(winId, on) {
+        var wanted = String(on) === "1" || on === true;
+        if (wanted !== _formEditOn) {
+          _formEditOn = wanted;
+          formEditListen(wanted);
+          mylog("formedit.edit: " + (wanted ? "on" : "off"));
+        }
+        _formEditClicked = -1;
+        return [];
+      },
+      //the element hit by the last click, -1 when there was none since the
+      //last time it was asked
+      getclickednode: function() {
+        var clicked = _formEditClicked;
+        _formEditClicked = -1;
+        return [clicked];
+      },
       setselectednodes: function(ids) {
         var app = this.getAnchorNode().getApplication();
         formEditClear();
