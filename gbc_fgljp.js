@@ -386,6 +386,13 @@ console.log("gbc_fgljp begin");
   var _formEditOn = false;
   var _formEditClicked = -1;
   var FORMEDIT_ACTION = "formeditclick";
+  //A click marks what it hit right away instead of waiting for the program
+  //to mark it back: that answer only arrives once the program has told its
+  //editor, the editor has moved its cursor and the form has been compiled
+  //again for the new cursor position, which is well over a second. If none
+  //of that comes back, the marker returns to where it was.
+  var FORMEDIT_CONFIRM_MS = 3000;
+  var _formEditRevert = null;
   function formEditWidgetTag(el) {
     var widget = window.gbc.WidgetService.getWidgetFromElement(el);
     if (widget && widget.getAUIWidget && widget.getAUIWidget()) {
@@ -416,8 +423,38 @@ console.log("gbc_fgljp begin");
     }
     _formEditClicked = tag;
     var app = getCurrentApp();
+    formEditMarkNow(tag, app);
     if (app) {
       app.scheduler.actionVMCommand(null, { actionName: FORMEDIT_ACTION });
+    }
+  }
+  //marks the clicked element and arms the way back, see FORMEDIT_CONFIRM_MS
+  function formEditMarkNow(tag, app) {
+    var node = app ? getNode(tag, app) : null;
+    var el = node ? formEditElement(node) : null;
+    if (!el) {
+      return;
+    }
+    var previous = _formEditMarked;
+    formEditClear();
+    addFormEditStyle();
+    el.classList.add(FORMEDIT_CLASS);
+    _formEditMarked = [el];
+    formEditCancelRevert();
+    _formEditRevert = setTimeout(function() {
+      _formEditRevert = null;
+      mylog("formedit: click was not confirmed, marker goes back");
+      formEditClear();
+      for (var i = 0; i < previous.length; i++) {
+        previous[i].classList.add(FORMEDIT_CLASS);
+      }
+      _formEditMarked = previous;
+    }, FORMEDIT_CONFIRM_MS);
+  }
+  function formEditCancelRevert() {
+    if (_formEditRevert) {
+      clearTimeout(_formEditRevert);
+      _formEditRevert = null;
     }
   }
   function formEditListen(on) {
@@ -442,6 +479,8 @@ console.log("gbc_fgljp begin");
           mylog("formedit.edit: " + (wanted ? "on" : "off"));
         }
         _formEditClicked = -1;
+        //leaving or entering edit mode ends whatever a click was waiting for
+        formEditCancelRevert();
         return [];
       },
       //the element hit by the last click, -1 when there was none since the
@@ -453,6 +492,9 @@ console.log("gbc_fgljp begin");
       },
       setselectednodes: function(ids) {
         var app = this.getAnchorNode().getApplication();
+        //the program says where the marker belongs, so a click that was
+        //marked ahead of this has nothing left to go back to
+        formEditCancelRevert();
         formEditClear();
         var list = String(ids === null || ids === undefined ? "" : ids)
           .split(",");
