@@ -331,6 +331,82 @@ console.log("gbc_fgljp begin");
     }
     return getClickableGBCEl(el.parentElement,text);
   }
+  //"formedit" front calls: the GDC has them (the form editor of fglped
+  //drives its preview with them), GBC has not. A form design tool showing
+  //its form in GBC needs the same thing: mark the element the editor cursor
+  //is in, whatever it is - a marker drawn on the element's DOM node also
+  //covers what a presentation style cannot reach, such as a column of a
+  //table that has no rows yet.
+  //Same call as the GDC one:
+  //  CALL ui.Interface.frontCall("formedit","setselectednodes",[id],[])
+  //where id is an AUI node id, several ids separated by comma, or "" to
+  //clear the marker.
+  var _formEditMarked = [];
+  var FORMEDIT_CLASS = "fgljp_formedit_selected";
+  function addFormEditStyle() {
+    if (document.getElementById("fgljp_formedit_style")) {
+      return;
+    }
+    var style = document.createElement("style");
+    style.id = "fgljp_formedit_style";
+    //outline rather than border: it does not take part in the layout, so
+    //marking an element cannot move the form around
+    style.textContent = "." + FORMEDIT_CLASS + "{outline:2px solid #ff9800;" +
+      "outline-offset:-2px;background-color:rgba(255,152,0,0.18);}";
+    document.head.appendChild(style);
+  }
+  //the node itself may have no widget yet (a TableColumn of an empty table
+  //keeps its header, the decoration node below it has nothing on screen), so
+  //walk up until something is actually on screen
+  function formEditElement(node) {
+    var levels = 0;
+    while (node && levels < 4) {
+      var widget = node.getWidget ? node.getWidget() : null;
+      var el = widget && widget.getElement ? widget.getElement() : null;
+      if (el) {
+        return el;
+      }
+      node = node.getParentNode ? node.getParentNode() : null;
+      levels++;
+    }
+    return null;
+  }
+  function formEditClear() {
+    for (var i = 0; i < _formEditMarked.length; i++) {
+      _formEditMarked[i].classList.remove(FORMEDIT_CLASS);
+    }
+    _formEditMarked = [];
+  }
+  function addFormEditFrontCalls(gbc) {
+    gbc.FrontCallService.modules.formedit = {
+      setselectednodes: function(ids) {
+        var app = this.getAnchorNode().getApplication();
+        formEditClear();
+        var list = String(ids === null || ids === undefined ? "" : ids)
+          .split(",");
+        for (var i = 0; i < list.length; i++) {
+          var id = parseInt(list[i], 10);
+          if (isNaN(id)) {
+            continue;
+          }
+          var node = getNode(id, app);
+          if (!node) {
+            mylog("formedit.setselectednodes: no node with id " + id);
+            continue;
+          }
+          var el = formEditElement(node);
+          if (!el) {
+            mylog("formedit.setselectednodes: nothing on screen for id " + id);
+            continue;
+          }
+          addFormEditStyle();
+          el.classList.add(FORMEDIT_CLASS);
+          _formEditMarked.push(el);
+        }
+        return [];
+      }
+    };
+  }
   function addFGLGBCFrontCalls(gbc) {
     gbc.FrontCallService.modules.fgljp = {
       click_on_element_with_text: function(text,xinterval) {
@@ -735,6 +811,7 @@ console.log("gbc_fgljp begin");
     }
     patchFCURForced(gbc);
     addFGLGBCFrontCalls(gbc);
+    addFormEditFrontCalls(gbc);
   }
   function patchWrapResourcePath(classes) {
     var VMApplicationP = classes.VMApplication.prototype;
