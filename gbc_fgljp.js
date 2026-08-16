@@ -450,9 +450,16 @@ console.log("gbc_fgljp begin");
     if (!formEditInForm(node)) {
       return;
     }
-    //the form is being looked at, not used: the click does not reach it
-    event.preventDefault();
-    event.stopPropagation();
+    //A folder tab belongs to the form, but clicking one is how the user
+    //turns to that page - that has to keep working, so the click is left
+    //alone and only reported. Both ends agree on it: the form compiler marks
+    //the Page for a cursor on its PAGE line, so the editor cursor lands
+    //where the page is written and comes back marking the same page.
+    if (node.getTag() !== "Page") {
+      //the form is being looked at, not used: the click does not reach it
+      event.preventDefault();
+      event.stopPropagation();
+    }
     _formEditClicked = tag;
     formEditMarkNow(tag, app);
     app.scheduler.actionVMCommand(null, { actionName: FORMEDIT_ACTION });
