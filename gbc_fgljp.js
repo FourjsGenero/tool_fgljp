@@ -377,6 +377,32 @@ console.log("gbc_fgljp begin");
     }
     _formEditMarked = [];
   }
+  //Brings the element within reach before it is marked: an element on a
+  //folder page that is not the current one has nothing on screen to mark at
+  //all, so the pages it sits on have to be raised first. GBC does that
+  //through the controller of the node - PageController.ensureVisible() makes
+  //its page current and passes the request on to its own parent, so folders
+  //inside folders come out right whatever the depth. Nodes with no
+  //controller of their own (the decoration node below a TableColumn) are
+  //handled from the nearest ancestor that has one, the way GBC's own
+  //visibleId behaviour does it.
+  function formEditEnsureVisible(node) {
+    var ctrl = null;
+    while (node && !ctrl) {
+      ctrl = node.getController ? node.getController() : null;
+      node = ctrl ? node : (node.getParentNode ? node.getParentNode() : null);
+    }
+    if (ctrl && ctrl.ensureVisible) {
+      ctrl.ensureVisible(false);
+    }
+  }
+  //...and once it is on a visible page, scrolled to. GBC scrolls for the
+  //dialog's current field, which a form being looked at does not have.
+  function formEditScrollTo(el) {
+    if (el.scrollIntoView) {
+      el.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }
   //The other direction of the form editor contract: while edit mode is on, a
   //click picks the element instead of using the form, and the program is told
   //with the "formeditclick" action - a program that does not declare it is
@@ -514,6 +540,7 @@ console.log("gbc_fgljp begin");
             mylog("formedit.setselectednodes: no node with id " + id);
             continue;
           }
+          formEditEnsureVisible(node);
           var el = formEditElement(node);
           if (!el) {
             mylog("formedit.setselectednodes: nothing on screen for id " + id);
@@ -522,6 +549,7 @@ console.log("gbc_fgljp begin");
           addFormEditStyle();
           el.classList.add(FORMEDIT_CLASS);
           _formEditMarked.push(el);
+          formEditScrollTo(el);
         }
         return [];
       }
