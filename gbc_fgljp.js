@@ -362,6 +362,13 @@ console.log("gbc_fgljp begin");
     var levels = 0;
     while (node && levels < 4) {
       var widget = node.getWidget ? node.getWidget() : null;
+      //A folder page is marked on its tab, not on its body: the body is the
+      //whole page and shows nothing, and raising a page already makes it the
+      //current one - with folders inside folders that leaves two current
+      //tabs and no way to tell which one the cursor is on.
+      if (widget && widget.getTitleWidget && widget.getTitleWidget()) {
+        widget = widget.getTitleWidget();
+      }
       var el = widget && widget.getElement ? widget.getElement() : null;
       if (el) {
         return el;
