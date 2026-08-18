@@ -192,6 +192,10 @@ DEFINE _opt_logfile STRING
 DEFINE _opt_hide_chromebar BOOLEAN
 DEFINE _opt_autoclose BOOLEAN
 DEFINE _opt_any BOOLEAN
+--BROWSER=none as an option: a caller whose environment does not reach us -
+--the fgl* tools proxied into a container with docker exec, say - has no
+--other way to say it, and without it we try to open a browser there
+DEFINE _opt_no_browser BOOLEAN
 DEFINE _opt_gdc BOOLEAN
 DEFINE _opt_runonserver BOOLEAN
 DEFINE _opt_nostart BOOLEAN
@@ -656,6 +660,13 @@ PRIVATE FUNCTION parseArgs()
   LET o[i].arg_type = mygetopt.NONE
 
   LET i = o.getLength() + 1
+  LET o[i].name = "no-browser"
+  LET o[i].description =
+      "print the URL instead of opening a browser, like BROWSER=none does"
+  LET o[i].opt_char = NULL
+  LET o[i].arg_type = mygetopt.NONE
+
+  LET i = o.getLength() + 1
   LET o[i].name = "listen-any"
   LET o[i].description = "fgljp is reachable from outside"
   LET o[i].opt_char = "a"
@@ -699,6 +710,8 @@ PRIVATE FUNCTION parseArgs()
           CASE o[mygetopt.option_index(gr)].name
             WHEN "hide-chromebar"
               LET _opt_hide_chromebar = TRUE
+            WHEN "no-browser"
+              LET _opt_no_browser = TRUE
           END CASE
         END IF
     END CASE
@@ -866,7 +879,7 @@ FUNCTION parseHttpLine(x TConn INOUT, s STRING)
   END IF
 END FUNCTION
 
-FUNCTION setAppCookie(x TConn INOUT, path STRING)
+FUNCTION setAppCookie(x TConn INOUT, path STRING) RETURNS BOOLEAN
   UNUSED_VAR(path)
   {
   IF _s[x].appCookie IS NOT NULL THEN
@@ -880,9 +893,17 @@ FUNCTION setAppCookie(x TConn INOUT, path STRING)
   IF dict.contains("monitor") AND x.path.equals("/gbc/index.html") THEN
     CALL log(SFMT("setAppCookie: monitor seen,appCookie=%1", x.appCookie))
   ELSE
-    MYASSERT(dict.contains("app"))
+    --Asking for the GBC page without naming a session is not an error worth
+    --dying for: whoever forwards the port probes it (VS Code does when it
+    --forwards for a webview, so does a load balancer), and an assertion here
+    --took the server and the program it runs down with it. Say no instead.
+    IF NOT dict.contains("app") THEN
+      CALL log("setAppCookie: no app in the query, nothing to attach to")
+      RETURN FALSE
+    END IF
     LET x.appCookie = dict["app"]
   END IF
+  RETURN TRUE
   --DISPLAY ">>>>set app cookie:", dict["app"]
 END FUNCTION
 
@@ -1205,7 +1226,9 @@ FUNCTION handleUAProto(x TConn INOUT, path STRING) RETURNS BOOLEAN
       LET sessId = procId
       CALL log(SFMT("handleUAProto procId:%1", procId))
       IF _opt_gdc THEN
-        CALL setAppCookie(x, path)
+        IF NOT setAppCookie(x, path) THEN
+          RETURN http404(x, path)
+        END IF
       END IF
     WHEN path.getIndexOf("/ua/sse/", 1) == 1
       LET sessId = util.Strings.urlDecode(path.subString(9, qidx - 1))
@@ -1549,7 +1572,9 @@ FUNCTION handleGBCPath(x TConn INOUT, path STRING) RETURNS BOOLEAN
   --DISPLAY "handleGBCPath:", path
   CASE
     WHEN path == "/gbc/index.html"
-      CALL setAppCookie(x, path)
+      IF NOT setAppCookie(x, path) THEN
+        RETURN http404(x, path)
+      END IF
     WHEN path == "/gbc/gbc_fgljp.js"
         AND os.Path.exists((fname := os.Path.join(_owndir, "gbc_fgljp.js")))
       CALL log(SFMT("handleGBCPath: process our gbc_fglp bootstrap:%1", fname))
@@ -4401,6 +4426,9 @@ FUNCTION openBrowser(url)
     RETURN
   END IF
   LET browser = fgl_getenv("BROWSER")
+  IF _opt_no_browser THEN
+    LET browser = "none"
+  END IF
   IF browser=="none" THEN
     DISPLAY "Copy the following URL into your browser:"
     DISPLAY url
