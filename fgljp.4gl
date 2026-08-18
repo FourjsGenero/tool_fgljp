@@ -282,7 +282,10 @@ MAIN
   LET _port = port
   --DISPLAY "port:", port
   LET _server = base.Channel.create()
-  CALL _server.openServerSocket("127.0.0.1", port, "u")
+  --with --listen-any the server must accept connections from outside this
+  --machine, which is what the option promises: binding 127.0.0.1 would only
+  --look free (findFreePortL probes the same way) and then refuse them
+  CALL _server.openServerSocket(IIF(_opt_any, NULL, "127.0.0.1"), port, "u")
   IF _direct_mode THEN
     CALL writeStartFile(port)
   END IF
