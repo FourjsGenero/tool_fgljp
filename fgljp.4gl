@@ -301,8 +301,25 @@ MAIN
           port, fgl_getenv("FGLSERVER")))
   LET htpre = SFMT("http://" || _localhost || ":%1/", port)
   LET _htpre = htpre
-  LET priv = htpre, "priv/"
-  LET pub = htpre
+  --the VM hands resource URLs (the image2font fonts, FGLIMAGEPATH images) to
+  --the front end in the AUI tree. Relative ones are resolved by the browser
+  --against the page origin, so they keep working when something sits between
+  --the browser and fgljp: VS Code's port forwarding, an ssh tunnel, a reverse
+  --proxy. An absolute http://localhost:<port>/ only ever works when the
+  --browser runs on this machine.
+  IF _opt_gdc THEN
+    --a native GDC is not a page: it fetches the URL itself and has no origin
+    --to resolve a relative one against, so it keeps the absolute prefix and
+    --only works while GDC and fgljp share this machine
+    DISPLAY "Warning: --gdc: resource URLs stay absolute (",
+        htpre,
+        "), a GDC on another machine can't fetch them"
+    LET priv = htpre, "priv/"
+    LET pub = htpre
+  ELSE
+    LET priv = "/priv/"
+    LET pub = "/"
+  END IF
   CALL setOwnDir(os.Path.dirName(arg_val(0)))
   IF _opt_program IS NOT NULL THEN
     CALL checkGBCAvailable()

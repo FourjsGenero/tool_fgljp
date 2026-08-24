@@ -17,4 +17,7 @@ MAIN
   CALL testutils.checkRUN("fglrun test")
   CALL testutils.testPatternInFile("fgljp FINISH", "test.log", 5)
   CALL testutils.checkRUN(fgljp || " fttest")
+  --the resource URLs the VM publishes must survive a proxy or a forwarded
+  --port between the browser and fgljp
+  CALL testutils.checkRUN(fgljp || " urlprefix")
 END MAIN

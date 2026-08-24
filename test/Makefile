@@ -8,13 +8,13 @@
 	fglform -M $<
 
 
-all: testutils.42m test.42m test.42f interrupt.42f runtests.42m wait_for_fgljp_start.42m fttest.42m exitcode.42m parsetcl_test.42m quotevmstr_test.42m
+all: testutils.42m test.42m test.42f interrupt.42f runtests.42m wait_for_fgljp_start.42m fttest.42m exitcode.42m urlprefix.42m parsetcl_test.42m quotevmstr_test.42m
 
 wait_for_fgljp_start.42m: testutils.42m
 
 test.42m: testutils.42m test.42f
 
-runtests.42m: test.42m test.42f fttest.42m exitcode.42m
+runtests.42m: test.42m test.42f fttest.42m exitcode.42m urlprefix.42m
 
 # unit test for the fgljp Tcl AUI scanner (imports fgljp.42m from ..)
 parsetcl_test.42m: parsetcl_test.4gl ../fgljp.42m
