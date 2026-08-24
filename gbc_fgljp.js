@@ -379,6 +379,7 @@ console.log("gbc_fgljp begin");
     return null;
   }
   function formEditClear() {
+    formEditScrollCancel();
     for (var i = 0; i < _formEditMarked.length; i++) {
       _formEditMarked[i].classList.remove(FORMEDIT_CLASS);
     }
@@ -405,10 +406,52 @@ console.log("gbc_fgljp begin");
   }
   //...and once it is on a visible page, scrolled to. GBC scrolls for the
   //dialog's current field, which a form being looked at does not have.
-  function formEditScrollTo(el) {
-    if (el.scrollIntoView) {
-      el.scrollIntoView({ block: "nearest", inline: "nearest" });
+  //
+  //Scrolling right here reaches nothing: the mark is applied while the AUI
+  //update is still being processed, and until GBC has laid the form out
+  //every element sits at the top left of an unscrollable container. That is
+  //what left a form wider than the panel at scrollLeft 0 with the marked
+  //element off screen - editing an element that needs horizontal scrolling
+  //redrew the form and left the cursor's element out of sight. Waiting a
+  //frame or two does not do either: that early position holds still long
+  //enough to look settled. So take GBC's own signal for "the layout has
+  //run", the afterLayout event of the application's layout service, which is
+  //what GBC itself uses to place things it can only place afterwards. The
+  //subscription stays for a moment rather than a single event, so the last
+  //of several layout passes wins, and a resize right after an edit is
+  //followed too.
+  var FORMEDIT_SCROLL_MS = 2000;
+  var _formEditScrollOff = null;
+  function formEditScrollCancel() {
+    if (_formEditScrollOff) {
+      _formEditScrollOff();
+      _formEditScrollOff = null;
     }
+  }
+  //scrolls to the element unless it is gone or no longer the marked one
+  function formEditScrollNow(el) {
+    if (!el.scrollIntoView || !document.contains(el) ||
+        !el.classList.contains(FORMEDIT_CLASS)) {
+      return false;
+    }
+    el.scrollIntoView({ block: "nearest", inline: "nearest" });
+    return true;
+  }
+  function formEditScrollTo(el, app) {
+    var deadline = Date.now() + FORMEDIT_SCROLL_MS;
+    var layout = app && app.layout;
+    var events = window.gbc && gbc.constants && gbc.constants.widgetEvents;
+    formEditScrollCancel();
+    //the form may be laid out already: a cursor move that changed no widget
+    formEditScrollNow(el);
+    if (!layout || !layout.when || !events || !events.afterLayout) {
+      return;
+    }
+    _formEditScrollOff = layout.when(events.afterLayout, function() {
+      if (!formEditScrollNow(el) || Date.now() > deadline) {
+        formEditScrollCancel();
+      }
+    });
   }
   //The other direction of the form editor contract: while edit mode is on, a
   //click picks the element instead of using the form, and the program is told
@@ -563,7 +606,7 @@ console.log("gbc_fgljp begin");
           addFormEditStyle();
           el.classList.add(FORMEDIT_CLASS);
           _formEditMarked.push(el);
-          formEditScrollTo(el);
+          formEditScrollTo(el, app);
         }
         return [];
       }
