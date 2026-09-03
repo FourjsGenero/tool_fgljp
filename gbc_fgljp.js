@@ -455,13 +455,14 @@ console.log("gbc_fgljp begin");
   }
   //The other direction of the form editor contract: while edit mode is on, a
   //click picks the element instead of using the form, and the program is told
-  //with the "formeditclick" action - a program that does not declare it is
+  //with the "fglfed_select" action - the name the GDC uses for it, and a
+  //program that does not declare it is
   //not disturbed by it. It then asks getclickednode() what was hit, which is
   //how an editor can put its cursor on the source of the element clicked.
   //Secondary clicks are left alone: they open the context menu.
   var _formEditOn = false;
   var _formEditClicked = -1;
-  var FORMEDIT_ACTION = "formeditclick";
+  var FORMEDIT_ACTION = "fglfed_select";
   //A click marks what it hit right away instead of waiting for the program
   //to mark it back: that answer only arrives once the program has told its
   //editor, the editor has moved its cursor and the form has been compiled
