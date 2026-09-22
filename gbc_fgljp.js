@@ -70,13 +70,16 @@ console.log("gbc_fgljp begin");
       console.trace();
     }
   }
+  //null while GBC has no session: the page was opened for a program that is
+  //gone, or a second time for one that another page already shows. Leaving
+  //such a page must not throw - onbeforeunload below asks for the app.
   function getCurrentSession() {
-    const ss=window.gbc.SessionService;
-    return ss.getCurrent();
+    const ss=window.gbc && window.gbc.SessionService;
+    return ss ? ss.getCurrent() : null;
   }
   function getCurrentApp() {
     const sess=getCurrentSession();
-    return sess.getCurrentApplication();
+    return sess ? sess.getCurrentApplication() : null;
   }
   //override gbc's onbeforeunload
   window.onbeforeunload = function() {
