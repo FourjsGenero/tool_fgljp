@@ -39,6 +39,8 @@ test: all
 	FGLLDPATH=.. FGL_LENGTH_SEMANTICS=CHAR fglrun parsetcl_test
 	FGLLDPATH=.. FGL_LENGTH_SEMANTICS=BYTE fglrun quotevmstr_test
 	FGLLDPATH=.. FGL_LENGTH_SEMANTICS=CHAR fglrun quotevmstr_test
+	# unit test for gbc_fgljp.js: Node's own test runner, no dependencies
+	node --test gbc_fgljp_test.js
 	FGL_LENGTH_SEMANTICS=BYTE fglrun runtests
 	FGL_LENGTH_SEMANTICS=CHAR fglrun runtests
 
